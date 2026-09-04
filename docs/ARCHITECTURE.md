@@ -1,77 +1,140 @@
 # Architecture
 
-Kukni is a preview system with replaceable renderers and desktop integrations. It currently contains two deliberately separate paths: a usable, dependency-free CR2 adapter for legacy GNOME Sushi and a source-only standalone GTK prototype.
+Kukni is a standalone GTK4 file previewer with a persistent session, a
+capability-based renderer registry, and narrow desktop-integration boundaries.
+GNOME Files (Nautilus) is the first supported file manager, but it is not the
+owner of Kukni's UI or rendering code.
 
-## Legacy CR2 data flow
+## Current data flow
 
 ```text
-Nautilus
-  └─ GNOME Sushi 46 MIME dispatch
-       └─ viewers/kukni.js
-            ├─ starts a fixed per-user helper with an argv vector
-            ├─ enforces a five-second child lifetime
-            └─ incrementally decodes a bounded JPEG with GdkPixbuf
-                 ▲
-                 │ stdout only
-       helpers/kukni-extract-preview.py
-            ├─ opens one regular-file descriptor read-only
-            ├─ applies container and parser-work budgets
-            ├─ rejects RAW sensor JPEG frames and unsafe dimensions
-            └─ emits one original embedded display JPEG
+Nautilus Space key                         `kukni FILE`
+        │                                      │
+        └─ org.gnome.NautilusPreviewer D-Bus ──┤
+                                               ▼
+                                      Kukni application
+                                               │
+                                      persistent PreviewWindow
+                                               │
+                                  local-file and capability probe
+                                               │
+                 ┌──────────────┬──────────────┼──────────────┐
+                 ▼              ▼              ▼              ▼
+            text/source     native XLSX    gated HTML     gated PDF
+                 │              │              │              │
+                 └──────────────┴──────┬───────┴──────────────┘
+                                      ▼
+                         universal metadata/text/hex fallback
 ```
 
-The extractor never develops RAW sensor data. Cameras normally store one or more ordinary JPEGs inside a RAW container for on-camera review and desktop thumbnails; using that image makes previews fast and color-correct according to the camera's own processing.
+Kukni owns the user-session previewer D-Bus name and implements both the legacy
+and current Nautilus method shapes needed by the present compatibility target.
+The normal installer creates a user-level activation file, so Nautilus can start
+Kukni on demand. GNOME Sushi is not involved and is not a runtime dependency.
+
+Nautilus remains responsible for folder selection. When an arrow key is pressed,
+Kukni emits a `SelectionEvent`; Nautilus selects the adjacent item and answers
+with another `ShowFile` call. Kukni updates its current URI only after that call,
+keeping the same top-level window alive through rich previews, fallbacks, and
+errors.
+
+## Session model
+
+Every request gets a monotonically increasing generation. New navigation
+cancels work for the old generation, and late results are ignored. A renderer
+can resolve to a rich preview, a fallback, or an error, but it does not decide
+when the session closes. Space, Escape, or the window close control ends the
+session.
+
+The outer window uses a stable viewport instead of resizing to each file. On
+Wayland, Kukni accepts Nautilus's foreign parent handle so the compositor can
+place the preview relative to the Files window without unsupported absolute
+positioning.
+
+Kukni accepts native local files only. Remote URIs receive an in-window
+explanation and are not fetched.
+
+## Renderer contract
+
+The registry probes renderers in deterministic order. A renderer receives one
+`Gio.File`, its already-queried metadata, a cancellation object, and success and
+error callbacks. If no rich renderer accepts the file—or a renderer cannot run
+within its required boundary—the universal fallback shows metadata and a
+bounded text or hex sample.
+
+Current automatic routes are:
+
+1. **XLSX** — a bounded ZIP/XML parser produces an inert model for a native GTK
+   table. It reads only the first visible worksheet, shows cached formula values,
+   and ignores macros, active content, and external relationships.
+2. **PDF** — Poppler renders page one in a short-lived bubblewrap namespace
+   behind `prlimit`. Input and output sizes, CPU, address space, descriptors,
+   dimensions, and wall time are bounded. If the sandbox probe fails, PDF uses
+   the fallback.
+3. **HTML** — WebKitGTK 6 may render a bounded local document only when its
+   process sandbox is usable. JavaScript, networking, forms, media, broad local
+   access, and other active features remain disabled. If that boundary is not
+   available, HTML uses the fallback.
+4. **Text/source** — a worker thread reads at most 1 MiB from a verified regular
+   file. Decoding is strict, deceptive controls are exposed, and executable or
+   launcher-like files are displayed rather than run.
+
+The fallback is part of the product contract, not an error page. It makes
+navigation continuous even before a dedicated renderer exists for a format.
 
 ## Trust boundaries
 
-- The selected path and all file bytes are untrusted input.
-- The helper runs as the desktop user, with no network access requested and no file writes in its code path.
-- The stdout byte stream crosses into GdkPixbuf, a native decoder in the Sushi process. Kukni limits its source and rendered dimensions, but this is not a security sandbox.
-- Files under the user's Sushi data directory are executable plugin code and must be protected by normal user-account permissions.
+- Selected paths, metadata, container structures, and every file byte are
+  untrusted input.
+- Kukni never invokes a selected file as a command and never hands it to a shell
+  or default application.
+- All parsing and rendering paths have explicit input, work, output, or time
+  limits appropriate to the format.
+- A sandbox-gated renderer falls back when its boundary is unavailable; it must
+  not disable or weaken the sandbox to improve compatibility.
+- Renderer failures and stale work remain inside the current preview session so
+  navigation can continue.
 
-## Why two processes?
+Ubuntu's AppArmor policy can deny unprivileged user namespaces to an unconfined
+source installation. That means bubblewrap-backed PDF and HTML rendering may
+correctly remain unavailable even when their packages are installed. A future
+`.deb` can ship a narrowly scoped AppArmor profile; the source installer does
+not alter system security policy.
 
-Scanning the container in a child keeps parser CPU and memory separate from Sushi and lets the viewer terminate stalled work. The child emits a standard JPEG, so the desktop integration remains small and does not need a full RAW library.
+## Work that exists but is not routed
 
-This is containment, not isolation: the child has the same user identity as Sushi. A future standalone viewer should use the desktop's sandboxed image-loading facilities where available.
+An isolated media worker and parent supervisor can produce one bounded video
+frame or audio metadata through a size-checked protocol. It is deliberately
+absent from the default registry: per-process limits do not yet provide the
+aggregate process-tree and task containment required for automatic decoding of
+untrusted media. Enabling it requires a tested cgroup or equivalent no-fork
+boundary plus packaged sandbox integration tests.
+
+The repository also contains a bounded Canon CR2 embedded-JPEG extractor. The
+standalone app does not yet have an image/RAW decoding route, so CR2 currently
+uses the universal fallback. No GNOME Sushi plugin integration ships with
+Kukni.
 
 ## Extension boundaries
 
-Future work should preserve three layers:
+New work should preserve four layers:
 
-1. **Extractors** accept a local file and return a bounded, typed preview plus non-sensitive metadata.
-2. **Viewer core** owns zoom, navigation, metadata presentation, timeouts, cancellation, and sandbox policy.
-3. **Desktop adapters** connect the viewer to Sushi, Nautilus, Nemo, Dolphin, or a standalone launcher without duplicating format parsing.
+1. **Desktop adapters** translate a narrow host contract into preview and
+   navigation requests.
+2. **Session core** owns URI state, cancellation, generation checks, timeouts,
+   and close behavior.
+3. **Renderer registry** selects an available capability without changing
+   session policy.
+4. **Parsers and workers** turn one validated local file into a bounded, inert
+   model or pixel payload.
 
-New RAW MIME types should be enabled only after a representative local corpus passes the same malformed-input and resource-limit tests. Format-specific parsing belongs in an extractor, not in a desktop adapter.
+Format parsing does not belong in the Nautilus adapter. A new renderer must fail
+honestly when its dependencies or containment are unavailable, and malformed
+input tests must accompany happy-path coverage.
 
-## Standalone viewer prototype
+## Compatibility target
 
-The standalone app routes each request through a capability registry:
-
-```text
-selected URI
-  └─ type and capability probe
-       ├─ native renderer: text/source and XLSX
-       ├─ disposable PDF worker
-       ├─ constrained web renderer: HTML, when its sandbox is available
-       ├─ planned native/sandboxed image and RAW renderer
-       ├─ gated disposable media worker
-       └─ universal fallback: metadata plus safe text/hex inspection
-```
-
-Renderers produce content for one persistent preview window. A renderer may resolve to `ready`, `fallback`, or `error`; it may not close the session. The session controller owns the current URI, cancels stale asynchronous work, and ignores late results by generation number.
-
-The in-process GStreamer audio/video implementation remains available for isolated testing, but the default registry deliberately omits it. The newer worker path opens one parent-validated input descriptor, enters a bubblewrap network/PID namespace behind `prlimit`, pauses GStreamer long enough to obtain metadata and at most one bounded RGBA frame, and returns through two size-checked output descriptors. Raw pixels cross back instead of an encoded image, so the GTK process does not invoke another image decoder on worker-controlled output.
-
-That worker is still not registered automatically. Per-process limits do not provide an aggregate memory/task budget if compromised decoder code forks, and Ubuntu's AppArmor user-namespace policy requires a packaged profile before bubblewrap works in an otherwise unconfined source session. Enabling the route requires either a tested no-fork policy or a delegated cgroup limit, plus an integration test proving bubblewrap's PID namespace is quiescent before output is accepted. Until then media files reach the universal fallback and navigation continues.
-
-For Nautilus integration, Kukni can implement the user-session `org.gnome.NautilusPreviewer2` D-Bus contract. Arrow-key actions emit `SelectionEvent`; Nautilus remains responsible for choosing the adjacent item and responds with the next `ShowFile`. Kukni changes its current URI only on that call and keeps the window alive across unsupported files.
-
-The `windowHandle` supplied by Nautilus is also the placement contract. On Wayland, Kukni should use the foreign parent handle so the compositor can center the preview over the originating Files window; applications must not attempt unsupported absolute positioning. The outer window chooses a stable viewport from the active monitor's work area and renderers fit inside it without resizing the top level.
-
-HTML rendering requires JavaScript off, network requests blocked, and local resource access constrained. XLSX currently uses a bounded ZIP/XML parser and native table that ignores macro code, formula source, and external relationships. DOCX and PPTX conversion remain planned. Unknown formats always reach the universal fallback.
-
-## Compatibility policy
-
-The current JavaScript integration subclasses private methods from Sushi 46. It is tested on Ubuntu 24.04 only and should fail honestly on incompatible versions rather than claiming broad support. Sushi 51 introduced a different plugin API; that integration should live beside, not silently replace, the legacy adapter.
+The currently validated desktop combination is Ubuntu 24.04 with Nautilus 46.
+The previewer contract is private desktop integration rather than a freedesktop
+standard, so support for newer Nautilus releases must be verified explicitly.
+Other file managers are future adapters, not implied compatibility.

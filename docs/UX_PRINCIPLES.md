@@ -1,14 +1,36 @@
 # UX principles
 
-Kukni should feel like a temporary, continuous lens over the current file selection—not like opening and closing a sequence of miniature applications.
+Kukni should feel like a temporary, continuous lens over the current file
+selection—not a sequence of miniature applications.
+
+## Shipped alpha behavior
+
+The current standalone app provides these controls:
+
+- Nautilus opens the selected file with Space.
+- Space, Escape, or the window close control ends the preview.
+- Left, Right, Up, and Down ask Nautilus to move the selection while the preview
+  window remains open.
+- `F` or `F11` toggles fullscreen.
+- `Ctrl+O` opens a file chooser for direct-launch use.
+
+Arrow-key folder navigation depends on a Nautilus-owned preview session. In a
+direct `kukni FILE` launch, those keys explain that file-manager navigation is
+not connected.
+
+Zoom, fit, 100% view, panning, and an information-panel toggle are roadmap
+features; they are not implemented controls today.
 
 ## Session continuity
 
-- Space opens preview mode; Space, Escape, or the close control ends it.
-- Unsupported, malformed, slow, or failed files never close the preview window.
-- Left, Right, Up, and Down request navigation from the file manager while the window remains open.
-- The displayed filename, metadata, content, and current URI change together only after the new selection is confirmed.
-- Late work from the previous file is canceled and ignored; it cannot replace newer content.
+These are non-negotiable invariants:
+
+- Unsupported, malformed, slow, or failed files do not close the preview window.
+- The displayed filename, metadata, content, and current URI change together
+  only after the new selection is confirmed.
+- Late work from the previous file is canceled and ignored; it cannot replace
+  newer content.
+- A loading, fallback, or error state leaves navigation available.
 
 The required regression sequence is:
 
@@ -20,39 +42,59 @@ supported file A
   → C appears in the same window
 ```
 
-At no point may focus or selection snap back to A, and the user must not need to press Space again.
+At no point may focus or selection snap back to A, and the user must not need to
+press Space again.
 
 ## Universal usefulness
 
-Every regular file gets a meaningful state:
+Every accessible local regular file gets a meaningful state:
 
-- a rich preview when a safe renderer or converter is available;
-- a universal fallback with name, type, size, timestamps, and bounded text or hex content;
-- an in-window explanation when access or safety policy prevents reading it.
+- a rich preview when a safe renderer and its dependencies are available;
+- a universal fallback with name, type, size, timestamp, and bounded text or hex
+  content;
+- an in-window explanation when access or policy prevents reading it.
 
-“Unsupported” is a capability description, not a terminal error.
+“Unsupported” describes current renderer capability; it does not end the
+session. Remote locations are not fetched until a narrow portal-based access
+model exists.
 
 ## Keyboard first
 
-- Arrow keys navigate the surrounding selection.
-- `+` and `-` zoom; `0` fits; `1` shows 100%; `F` toggles fullscreen; `I` toggles information.
+- Primary actions stay reachable without moving to the pointer.
 - Controls remain discoverable to pointer users and expose accessible names.
-- Focus stays predictable; opening a toolbar or information panel does not steal navigation permanently.
+- Content views should not steal arrow-key navigation from the session.
+- New shortcuts must avoid ordinary typing interactions inside any future
+  focusable content.
+
+Planned image controls are `+` and `-` for zoom, `0` for fit, and `1` for 100%.
+They become part of the documented user contract only after implementation and
+accessibility testing.
 
 ## Stable presentation
 
-- The preview opens against the active monitor and requests compositor placement centered over the originating file-manager window.
-- The default viewport uses a consistent portion of the monitor's usable area instead of adopting the current file's natural dimensions.
-- The outer window keeps that stable size while content changes.
-- Loading uses the previous frame or a restrained placeholder rather than flashing or resizing.
-- Content uses a neutral canvas, preserves aspect ratio, and never upscales by default.
-- Fit mode is the default. A 100% view may overflow into panning, but it never changes the outer window size.
-- Errors are concise, actionable, and visually subordinate to navigation.
-- Reduced-motion and system light/dark preferences are respected.
+- The preview asks the compositor to associate it with the originating
+  file-manager window using the supplied parent handle.
+- The default viewport is stable instead of adopting every file's natural
+  dimensions.
+- Content changes use a restrained loading state rather than resizing the outer
+  window.
+- Rich content should preserve its natural proportions and should not upscale by
+  default.
+- Future 100% views may pan internally, but must not resize the outer window.
+- Errors stay concise and visually subordinate to the ability to continue.
+- System light/dark and reduced-motion preferences should be respected by every
+  custom presentation.
 
 ## Safe previews
 
-- Rendering must not execute document scripts or macros by default.
+- Rendering must not execute document scripts, launchers, formulas, or macros by
+  default.
 - HTML must not make network requests or gain broad local-file access.
 - Metadata panels must not reveal GPS by default.
-- Converters and extractors are bounded by input size, output size, time, and cancellation.
+- Converters and extractors need explicit input, output, time, work, and
+  cancellation limits.
+- A missing sandbox produces a fallback, never a request to disable security.
+
+A preview is successful only if it is fast enough to stay in the browsing flow,
+stable enough to navigate continuously, and bounded enough to handle an
+untrusted file without optimistic shortcuts.

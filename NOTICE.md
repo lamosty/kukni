@@ -1,7 +1,15 @@
 # Notices
 
-Kukni is an independent community project and is not affiliated with or endorsed by the GNOME Foundation, Canon, or Apple.
+Kukni is an independent community project and is not affiliated with or
+endorsed by the GNOME Foundation, Canon, Apple, or any Linux distribution.
 
-The current GNOME integration interoperates with [GNOME Sushi](https://gitlab.gnome.org/GNOME/sushi), whose source is licensed under GPL-2.0-or-later. Kukni is distributed under the same compatible license. This repository does not redistribute Sushi, GdkPixbuf, camera firmware, or third-party RAW sample files.
+The standalone application interoperates with GNOME Files (Nautilus) through
+its previewer D-Bus contract. It is not part of GNOME and does not redistribute
+Nautilus, GTK, libadwaita, WebKitGTK, Poppler, GStreamer, or bubblewrap.
 
-GNOME, Nautilus, Sushi, Canon, Apple, and other names may be trademarks of their respective owners. Their names are used only to describe compatibility.
+No camera firmware, personal documents, photographs, media, or third-party RAW
+sample files are distributed with Kukni.
+
+GNOME, Nautilus, Sushi, Canon, Apple, Quick Look, Ubuntu, and other names may be
+trademarks of their respective owners. Their names are used only to describe
+compatibility or product inspiration.

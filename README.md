@@ -3,41 +3,68 @@
 [![Tests](https://github.com/lamosty/kukni/actions/workflows/test.yml/badge.svg)](https://github.com/lamosty/kukni/actions/workflows/test.yml)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
 
-**Press Space. See the file.**
+## Quick Look for Linux
 
-Kukni is an open-source project for fast, native-feeling file previews on Linux. Its first working backend adds instant Canon CR2 previews to GNOME Files (Nautilus) through Sushi. A source-only standalone GTK prototype now provides the foundation for broader, continuous previews without inheriting Sushi's UI limitations.
+**Press Space. See the file. Keep moving.**
 
-Select a `.cr2` file in Files and press <kbd>Space</kbd>. Kukni finds the camera-generated JPEG already embedded in the CR2 and displays it without developing or altering the RAW image.
+Kukni is a free, keyboard-first file previewer for Linux. It gives GNOME Files
+(Nautilus) one stable preview window, so you can move through a folder with the
+arrow keys instead of opening a full application for every file. Files stay for
+browsing; applications stay for editing.
+
+Kukni is its own GTK4 application. It does **not** require GNOME Sushi.
 
 _Kukni_ is colloquial Slovak for “take a look.”
 
-## Current status
+> [!IMPORTANT]
+> Kukni is an early alpha with no packaged release yet. The current validation
+> target is Ubuntu 24.04 with Nautilus 46. Install from a reviewed source
+> checkout, expect rough edges, and read the format limits below.
 
-- The usable legacy adapter previews Canon CR2 files containing an embedded display JPEG. It is tested on Ubuntu 24.04 with GNOME Sushi 46; Sushi 51 and newer use a different plugin API.
-- The standalone prototype has one persistent GTK window, Nautilus D-Bus navigation, stable fallback states, bounded text/source previews, native XLSX tables, fit-page PDF rendering, and locked-down HTML where the required sandbox is available.
-- The standalone app is currently run from source. The installer below installs only the legacy CR2/Sushi adapter and does **not** replace the live Space-key preview service with Kukni.
-- An isolated media worker and strict parent supervisor can produce a bounded video frame or audio metadata without display, sound-server, home-directory, or network access. Automatic media routing remains disabled until aggregate process-tree limits and real packaged-sandbox integration tests are complete.
-- Standalone previews accept local regular files only. Remote locations receive an in-window explanation rather than being fetched.
+## What already works
 
-The RAW extractor is distro-neutral plain Python. The current desktop adapter is version-sensitive because it integrates with Sushi; the planned standalone viewer and Flatpak distribution remove that limitation. Kukni is not a RAW editor or a replacement for [LibRaw](https://www.libraw.org/).
+- Press <kbd>Space</kbd> on a local file in Nautilus to open or close Kukni.
+- Move with <kbd>←</kbd>, <kbd>→</kbd>, <kbd>↑</kbd>, and <kbd>↓</kbd> while the
+  same preview window stays open.
+- Read bounded, read-only previews of text, source code, configuration, logs,
+  JSON, XML, CSV, Markdown, and similar files.
+- Inspect the first visible worksheet of an XLSX file without starting an
+  office suite, evaluating formulas, running macros, or following external
+  links.
+- Render locked-down HTML and the first page of a PDF when their optional
+  engines and required sandbox are available.
+- Get a useful metadata plus text-or-hex inspection view for every other local
+  regular file instead of losing the preview session.
+- Open a file directly with `kukni FILE`, or choose one inside the app with
+  <kbd>Ctrl</kbd>+<kbd>O</kbd>.
 
-## Install the CR2 compatibility adapter
+Kukni accepts local regular files only. It does not fetch remote locations.
 
-Install Sushi first. On Debian and Ubuntu:
+### Current format limits
+
+| File kind | Current preview |
+| --- | --- |
+| Text and source | Read-only, bounded to the first 1 MiB; hidden controls are made visible |
+| XLSX | Bounded native table for the first visible worksheet; cached values only |
+| HTML | Available only with WebKitGTK 6 and a working process sandbox; scripts, network access, and broad local-file access stay disabled |
+| PDF | First page only, using Poppler inside a working bubblewrap sandbox |
+| Images and camera RAW, including CR2 | Metadata plus bounded inspection fallback; a standalone image/RAW renderer is not connected yet |
+| Audio and video | Metadata plus bounded inspection fallback; automatic media decoding is deliberately disabled |
+| Other local files | Metadata plus a bounded text or hex sample |
+
+If an optional renderer or its sandbox is unavailable, Kukni falls back rather
+than silently weakening the safety boundary.
+
+## Install for your user
+
+Kukni currently installs from source. On Ubuntu 24.04, install the core runtime
+dependencies:
 
 ```sh
-sudo apt install gnome-sushi
+sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
 ```
 
-On Fedora:
-
-```sh
-sudo dnf install sushi
-```
-
-On another distribution, install its GNOME Sushi package and verify that it provides the legacy viewer interface. Ubuntu 24.04/Sushi 46 is the currently verified combination.
-
-Then install the plugin for your user—do not use `sudo`:
+Then install Kukni without `sudo`:
 
 ```sh
 git clone https://github.com/lamosty/kukni.git
@@ -45,83 +72,110 @@ cd kukni
 ./install.sh
 ```
 
-If Sushi was already running, close the preview and reload it once:
+The installer places the application under `~/.local`, adds a desktop entry,
+and registers Kukni as your Nautilus preview service. It checks conflicts and
+will not overwrite modified or unowned files unless you explicitly use
+`--force` after reviewing them.
+
+Select a local file in Nautilus and press <kbd>Space</kbd>. If another preview
+service was already running during installation, sign out and back in once so
+the new user-session activation takes effect.
+
+You can also launch Kukni directly:
 
 ```sh
-pkill -x sushi
+kukni /path/to/file
 ```
 
-Now select a CR2 file in Files and press <kbd>Space</kbd>.
+If `~/.local/bin` is not on your `PATH`, use `~/.local/bin/kukni` or add that
+directory to your shell configuration.
 
-The installer writes only these two files:
+### Optional renderers
 
-```text
-~/.local/share/sushi/viewers/kukni.js
-~/.local/share/sushi/helpers/kukni-extract-preview.py
-```
-
-It refuses to overwrite different files unless `--force` is explicitly supplied.
-
-## Try the standalone prototype
-
-The standalone app is for development testing and is not installed by `install.sh`. On a system with its GTK4, libadwaita, Python GI, and renderer dependencies available, open one local file with:
+On Ubuntu, install the optional PDF and HTML runtime packages with:
 
 ```sh
-./bin/kukni /path/to/file
+sudo apt install poppler-utils bubblewrap util-linux gir1.2-webkit-6.0
 ```
 
-This opens Kukni directly; it does not change which application owns Nautilus's Space-key preview integration. Use synthetic or trusted local files while developing. See [Architecture](docs/ARCHITECTURE.md) for the current containment boundaries.
+Installing those packages does not guarantee that the host's user-namespace
+policy permits the sandbox; Kukni checks at runtime and falls back safely when
+it does not.
 
-## How the CR2 adapter works
+## Controls
 
-```text
-Nautilus → Sushi integration → bounded Kukni extractor → embedded JPEG → GdkPixbuf
-```
+| Key | Action |
+| --- | --- |
+| <kbd>Space</kbd> or <kbd>Esc</kbd> | Close the preview |
+| Arrow keys | Ask Nautilus for the adjacent selection |
+| <kbd>F</kbd> or <kbd>F11</kbd> | Toggle fullscreen |
+| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Choose a file directly |
 
-The viewer passes the selected path as a literal subprocess argument—there is no shell command. The helper opens the file read-only, accepts only a regular file, validates JPEG marker boundaries, excludes the lossless JPEG that contains RAW sensor data, and emits the largest safe display frame. Sushi decodes the result incrementally and scales it to at most 4096 × 4096 pixels.
-
-Safety limits include:
-
-- 128 MiB CR2 container size;
-- 64 MiB embedded JPEG size;
-- shared scan-byte, candidate, and marker budgets;
-- 32,768 pixels per source edge and 100 megapixels total;
-- a five-second extraction timeout;
-- child-process cleanup on error and preview closure.
-
-The plugin never writes to the selected photo and performs no network access. GdkPixbuf decoding still happens in the user's Sushi process, so this is not a security sandbox. Keep the operating system updated and treat files from unknown sources with appropriate caution.
+Arrow-key folder navigation is available when Nautilus opened the preview.
 
 ## Uninstall
 
-From the cloned repository:
+Do not use `sudo`:
 
 ```sh
 ./uninstall.sh
 ```
 
-The uninstaller refuses to remove files that differ from this checkout unless `--force` is supplied.
+You can also run the installed copy at
+`~/.local/lib/kukni/uninstall.sh`. The uninstaller verifies Kukni's ownership
+manifest and refuses to remove modified or unexpected files unless `--force`
+is explicitly supplied.
+
+### Migrating from GNOME Sushi
+
+Sushi is neither installed nor used by the default Kukni setup. If it is still
+installed from an earlier setup, verify that Kukni opens from Nautilus first.
+Ubuntu users may then remove the old package with:
+
+```sh
+sudo apt remove gnome-sushi
+```
+
+Kukni does not ship or install a Sushi plugin.
+
+## Packages and releases
+
+There is no Kukni APT repository, `.deb`, or Snap release today. The planned
+Ubuntu path is a reviewable `.deb` followed by a signed Launchpad PPA, so a
+future install can use normal `apt` updates. Snap is not the first packaging
+target because its confinement must be reconciled with Nautilus's session
+D-Bus contract and access to arbitrary selected files.
+
+See [Packaging](docs/PACKAGING.md) for the release plan.
 
 ## Development
 
-Run the synthetic parser, safety, installer, and JavaScript syntax tests:
+Run the parser, renderer, safety, and installer tests:
 
 ```sh
 make test
 ```
 
-To test a private local camera corpus without committing photos:
+Run GTK smoke tests in an isolated display when the required tools and optional
+renderers are installed:
+
+```sh
+make test-ui
+```
+
+To test the bounded CR2 extractor against a private camera corpus without
+committing photographs:
 
 ```sh
 CR2_SAMPLE_DIR=/path/to/samples make test-corpus
 ```
 
-Sample RAW files are deliberately ignored by Git. See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change.
+Sample RAW files are deliberately ignored by Git. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change.
 
-The current design and extension boundaries are documented in [Architecture](docs/ARCHITECTURE.md). Planned work is kept in the [Roadmap](docs/ROADMAP.md), interaction invariants live in [UX principles](docs/UX_PRINCIPLES.md), and the distribution plan is in [Packaging](docs/PACKAGING.md).
-
-## Why a plugin?
-
-GdkPixbuf's historical RAW loader is not shipped by Ubuntu, so Sushi 46 cannot preview CR2 files out of the box. Modern GNOME is moving image loading toward sandboxed [Glycin](https://gitlab.gnome.org/GNOME/glycin); contributing RAW support there is the better long-term direction. Kukni fills the practical gap today while leaving room for additional desktop integrations.
+Design details live in [Architecture](docs/ARCHITECTURE.md), next work is in
+the [Roadmap](docs/ROADMAP.md), and interaction invariants are in
+[UX principles](docs/UX_PRINCIPLES.md).
 
 ## License
 
