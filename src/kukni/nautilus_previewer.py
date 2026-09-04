@@ -40,7 +40,7 @@ INTERFACE_XML = """
     <property name="ParentHandle" type="s" access="read"/>
     <property name="Visible" type="b" access="read"/>
     <signal name="SelectionEvent">
-      <arg type="q" name="direction"/>
+      <arg type="u" name="direction"/>
     </signal>
   </interface>
 </node>
@@ -135,7 +135,10 @@ class NautilusPreviewerService:
             OBJECT_PATH,
             CURRENT_INTERFACE,
             "SelectionEvent",
-            GLib.Variant("(q)", (DIRECTION_VALUES[direction],)),
+            # @constraint Nautilus reads this signal as `(u)`. Sushi 46's
+            # historical introspection has advertised `(q)` in some builds,
+            # but matching that XML breaks the actual file-manager wire call.
+            GLib.Variant("(u)", (DIRECTION_VALUES[direction],)),
         )
         return True
 
