@@ -35,6 +35,7 @@ FILE_ATTRIBUTES = ",".join(
         Gio.FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
     )
 )
+OPENING_TIMEOUT_SECONDS = 12
 
 
 class PreviewWindow(Adw.ApplicationWindow):
@@ -51,7 +52,12 @@ class PreviewWindow(Adw.ApplicationWindow):
         self,
         application: Adw.Application,
         renderer_registry: RendererRegistry | None = None,
+        *,
+        opening_timeout_seconds: int = OPENING_TIMEOUT_SECONDS,
     ) -> None:
+        opening_timeout_seconds = int(opening_timeout_seconds)
+        if opening_timeout_seconds <= 0:
+            raise ValueError("opening timeout must be positive")
         super().__init__(
             application=application,
             title="Kukni",
@@ -66,6 +72,8 @@ class PreviewWindow(Adw.ApplicationWindow):
             else default_registry()
         )
         self._cancellable: Gio.Cancellable | None = None
+        self._opening_timeout_id = 0
+        self._opening_timeout_seconds = opening_timeout_seconds
         self._current_file: Gio.File | None = None
         self._external_parent_handle = ""
 
@@ -123,10 +131,15 @@ class PreviewWindow(Adw.ApplicationWindow):
         self._title.set_subtitle("Inspecting file…")
         self._stack.set_visible_child_name("loading")
         self.present()
+        self._start_opening_timeout(
+            token,
+            sanitize_display_label(file.get_basename(), "File"),
+        )
 
         if not file.is_native():
             message = "Remote files are not read until portal-based access is available"
             if self._session.resolve(token, PreviewState.ERROR, message):
+                self._clear_opening_timeout()
                 self._show_error(
                     sanitize_display_label(file.get_basename(), "Remote file"),
                     message,
@@ -182,6 +195,7 @@ class PreviewWindow(Adw.ApplicationWindow):
             ):
                 return
             if self._session.resolve(token, PreviewState.ERROR, error.message):
+                self._clear_opening_timeout()
                 self._show_error(
                     sanitize_display_label(file.get_basename(), "File"),
                     error.message,
@@ -246,6 +260,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         safe_subtitle = safe_subtitle or "Preview"
         if not self._session.resolve(token, PreviewState.PREVIEW, safe_subtitle):
             return
+        self._clear_opening_timeout()
         self._title.set_subtitle(safe_subtitle)
         self._replace_content(widget, "content")
 
@@ -273,6 +288,7 @@ class PreviewWindow(Adw.ApplicationWindow):
             view = FallbackView(file, info, self._cancellable)
         except Exception as error:
             if self._session.resolve(token, PreviewState.ERROR, str(error)):
+                self._clear_opening_timeout()
                 self._show_error(
                     info.get_display_name() or file.get_basename() or "File",
                     "File details could not be displayed",
@@ -280,6 +296,7 @@ class PreviewWindow(Adw.ApplicationWindow):
             return
         if not self._session.resolve(token, PreviewState.FALLBACK, detail):
             return
+        self._clear_opening_timeout()
         try:
             self._replace_content(view, "content")
         except Exception:
@@ -328,9 +345,48 @@ class PreviewWindow(Adw.ApplicationWindow):
         )
 
     def _cancel_current_work(self) -> None:
+        self._clear_opening_timeout()
         if self._cancellable is not None:
             self._cancellable.cancel()
             self._cancellable = None
+
+    def _start_opening_timeout(
+        self,
+        token: PreviewToken,
+        filename: str,
+    ) -> None:
+        self._clear_opening_timeout()
+        self._opening_timeout_id = GLib.timeout_add_seconds(
+            self._opening_timeout_seconds,
+            self._on_opening_timeout,
+            token,
+            filename,
+        )
+
+    def _clear_opening_timeout(self) -> None:
+        if self._opening_timeout_id:
+            GLib.source_remove(self._opening_timeout_id)
+            self._opening_timeout_id = 0
+
+    def _on_opening_timeout(
+        self,
+        token: PreviewToken,
+        filename: str,
+    ) -> bool:
+        self._opening_timeout_id = 0
+        if not self._is_current(token):
+            return GLib.SOURCE_REMOVE
+        if self._cancellable is not None:
+            self._cancellable.cancel()
+        unit = "second" if self._opening_timeout_seconds == 1 else "seconds"
+        message = (
+            f"Preview preparation exceeded {self._opening_timeout_seconds} {unit} "
+            "and was stopped"
+        )
+        if self._session.resolve(token, PreviewState.ERROR, message):
+            self._show_error(filename, message)
+            self.show_toast("Preview stopped safely · use arrows to continue")
+        return GLib.SOURCE_REMOVE
 
     def _request_navigation(self, direction: Direction) -> None:
         try:

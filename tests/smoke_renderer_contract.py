@@ -42,6 +42,8 @@ class ContractRenderer:
         if suffix == ".slow":
             self.slow_ready = on_ready
             return
+        if suffix == ".hang":
+            return
         on_ready(Gtk.Label(label="Current preview"), "Synthetic preview")
 
 
@@ -57,10 +59,11 @@ class ContractSmokeApplication(Adw.Application):
         self.window = PreviewWindow(
             self,
             RendererRegistry((self.renderer,)),
+            opening_timeout_seconds=1,
         )
         self._show("failure.exception")
         GLib.timeout_add(160, self._check_exception)
-        GLib.timeout_add_seconds(5, self._watchdog)
+        GLib.timeout_add_seconds(8, self._watchdog)
 
     def _show(self, name: str) -> None:
         path = self.directory / name
@@ -111,6 +114,17 @@ class ContractSmokeApplication(Adw.Application):
             self.failures.append("stale callback replaced the current URI")
         if snapshot.detail != "Synthetic preview":
             self.failures.append("stale callback replaced the current preview")
+        self._show("bounded.hang")
+        GLib.timeout_add(1600, self._check_hang_timeout)
+        return GLib.SOURCE_REMOVE
+
+    def _check_hang_timeout(self) -> bool:
+        self._expect_state(PreviewState.ERROR, "hung renderer timeout")
+        snapshot = self.window.session.snapshot
+        if "exceeded 1 second" not in snapshot.detail:
+            self.failures.append("hung renderer did not report the bounded timeout")
+        if self.window.lookup_action("navigate-down") is None:
+            self.failures.append("navigation disappeared after renderer timeout")
         self._finish()
         return GLib.SOURCE_REMOVE
 
