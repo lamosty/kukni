@@ -200,7 +200,10 @@ class MediaWorkerCommandTests(unittest.TestCase):
 
         self.assertEqual(command[0], "/usr/bin/prlimit")
         self.assertIn("--unshare-all", command)
+        self.assertIn("--unshare-user", command)
         self.assertIn("--disable-userns", command)
+        self.assertLess(command.index("--unshare-all"), command.index("--unshare-user"))
+        self.assertLess(command.index("--unshare-user"), command.index("--disable-userns"))
         self.assertNotIn("--share-net", command)
         self.assertIn("--cap-drop", command)
         self.assertIn("--clearenv", command)

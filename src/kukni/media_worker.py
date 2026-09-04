@@ -362,6 +362,9 @@ def build_media_worker_launch(
     sandbox_command = [
         bwrap_path,
         "--unshare-all",
+        # bwrap 0.9 requires the user namespace to be explicit when combining
+        # --unshare-all with --disable-userns; omission fails before launch.
+        "--unshare-user",
         "--disable-userns",
         "--die-with-parent",
         "--new-session",
