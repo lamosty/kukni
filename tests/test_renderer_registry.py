@@ -61,10 +61,10 @@ class RendererRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(RendererProbeError, "broken.*bad"):
             registry.select(object(), object())
 
-    def test_default_registry_contains_the_html_renderer(self):
+    def test_default_registry_has_deterministic_built_in_order(self):
         self.assertEqual(
             tuple(renderer.id for renderer in default_registry().renderers),
-            ("xlsx", "html"),
+            ("xlsx", "pdf", "html"),
         )
 
 

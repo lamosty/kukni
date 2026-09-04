@@ -50,6 +50,9 @@ def default_registry() -> RendererRegistry:
     """Return built-in rich renderers in deterministic priority order."""
 
     from .html import HtmlRenderer
+    from .pdf import PdfRenderer
     from .spreadsheet import SpreadsheetRenderer
 
-    return RendererRegistry((SpreadsheetRenderer(), HtmlRenderer()))
+    return RendererRegistry(
+        (SpreadsheetRenderer(), PdfRenderer(), HtmlRenderer())
+    )
