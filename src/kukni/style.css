@@ -48,3 +48,15 @@ stack {
   border-radius: 12px;
   background: alpha(@window_fg_color, 0.035);
 }
+
+.media-preview {
+  background: @window_bg_color;
+}
+
+.media-display {
+  background: #111318;
+}
+
+.media-controls {
+  padding: 2px 4px;
+}
