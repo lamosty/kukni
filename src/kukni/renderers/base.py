@@ -28,4 +28,4 @@ class Renderer(Protocol):
         on_ready: ReadyCallback,
         on_error: ErrorCallback,
     ) -> None:
-        """Start rendering and resolve through exactly one callback."""
+        """Resolve once on GTK's main context; never close the preview session."""
