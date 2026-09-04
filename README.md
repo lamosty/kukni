@@ -17,6 +17,7 @@ _Kukni_ is colloquial Slovak for “take a look.”
 - The legacy desktop adapter is tested on Ubuntu 24.04 with GNOME Sushi 46.
 - Uses Sushi's legacy per-user viewer interface. Sushi 51 and newer have a different plugin API and are not currently supported.
 - Local files only; remote `Gio.File` locations fall back to Sushi's normal behavior.
+- The standalone prototype keeps its in-process audio/video renderer out of automatic routing. Media files use the universal fallback until decoding runs in a disposable, resource-bounded worker.
 
 The RAW extractor is distro-neutral plain Python. The current desktop adapter is version-sensitive because it integrates with Sushi; the planned standalone viewer and Flatpak distribution remove that limitation. Kukni is not a RAW editor or a replacement for [LibRaw](https://www.libraw.org/).
 

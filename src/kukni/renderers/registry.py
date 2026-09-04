@@ -50,16 +50,16 @@ def default_registry() -> RendererRegistry:
     """Return built-in rich renderers in deterministic priority order."""
 
     from .html import HtmlRenderer
-    from .media import MediaRenderer
     from .pdf import PdfRenderer
     from .spreadsheet import SpreadsheetRenderer
     from .text import TextRenderer
 
+    # @constraint Media decoding stays opt-in until it can run in a disposable,
+    # resource-limited worker rather than inside the GTK process.
     return RendererRegistry(
         (
             SpreadsheetRenderer(),
             PdfRenderer(),
-            MediaRenderer(),
             HtmlRenderer(),
             TextRenderer(),
         )

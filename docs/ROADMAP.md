@@ -15,7 +15,8 @@ This is a direction, not a promise or release schedule. Each milestone should re
 - Implement the Nautilus preview D-Bus contract and preserve one session across navigation.
 - Add a capability-based renderer registry and universal metadata/text/hex fallback.
 - Treat `ready`, `fallback`, and `error` as in-window states; only explicit close actions end the session.
-- Add native image, text/source, PDF, and audio/video renderers.
+- Add native image, text/source, and PDF renderers.
+- Move audio/video decoding into a disposable, network-denied worker with CPU, memory, output, and wall-clock limits before enabling automatic media routing.
 - Add locked-down rendered HTML with a source-view toggle.
 - Add bounded Office conversion for XLSX, DOCX, and PPTX, with spreadsheet sheet navigation as a follow-up.
 - Add smooth zoom and pan, fit, 100% view, fullscreen, and keyboard-first controls.

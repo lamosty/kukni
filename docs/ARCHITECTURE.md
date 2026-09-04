@@ -52,13 +52,16 @@ The standalone app will route each request through a capability registry:
 ```text
 selected URI
   └─ type and capability probe
-       ├─ native renderer: image, text/source, PDF, audio/video
+       ├─ native renderer: image, text/source, PDF
+       ├─ disposable worker renderer: audio/video (planned)
        ├─ constrained web renderer: HTML
        ├─ bounded converter: RAW and Office documents
        └─ universal fallback: metadata plus safe text/hex inspection
 ```
 
 Renderers produce content for one persistent preview window. A renderer may resolve to `ready`, `fallback`, or `error`; it may not close the session. The session controller owns the current URI, cancels stale asynchronous work, and ignores late results by generation number.
+
+The in-process GStreamer audio/video implementation remains available for isolated testing, but the default registry deliberately omits it. Media files reach the universal fallback until decoding can run in a disposable, network-denied worker with CPU, memory, output, and wall-clock limits; a malformed decoder input must not be able to freeze the preview session.
 
 For Nautilus integration, Kukni can implement the user-session `org.gnome.NautilusPreviewer2` D-Bus contract. Arrow-key actions emit `SelectionEvent`; Nautilus remains responsible for choosing the adjacent item and responds with the next `ShowFile`. Kukni changes its current URI only on that call and keeps the window alive across unsupported files.
 
