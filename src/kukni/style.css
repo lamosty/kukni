@@ -1,0 +1,26 @@
+window {
+  background: @window_bg_color;
+}
+
+stack {
+  background: alpha(@view_bg_color, 0.96);
+}
+
+.fallback-view {
+  background: @view_bg_color;
+}
+
+.fallback-icon {
+  -gtk-icon-size: 72px;
+  color: alpha(@window_fg_color, 0.76);
+}
+
+.fallback-sample {
+  border-radius: 12px;
+  background: alpha(@window_fg_color, 0.035);
+}
+
+.fallback-sample textview,
+.fallback-sample text {
+  background: transparent;
+}

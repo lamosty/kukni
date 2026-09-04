@@ -1,4 +1,4 @@
-.PHONY: test test-python test-shell test-js test-install test-corpus install uninstall
+.PHONY: test test-python test-shell test-js test-install test-ui test-corpus install uninstall
 
 test: test-python test-shell test-js test-install
 
@@ -13,6 +13,9 @@ test-js:
 
 test-install:
 	./tests/test_install.sh
+
+test-ui:
+	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_app.py
 
 test-corpus:
 	test -n "$(CR2_SAMPLE_DIR)"
