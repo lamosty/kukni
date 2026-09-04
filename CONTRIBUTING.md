@@ -1,14 +1,14 @@
 # Contributing
 
-Thanks for helping make CR2 previews on GNOME safer and more reliable.
+Thanks for helping make Linux file previews safer, faster, and more consistent.
 
 ## Before opening a pull request
 
 1. Keep the project dependency-free unless a dependency has a clear security and maintenance benefit.
-2. Run `make test` on a supported GNOME system.
-3. Test malformed inputs as well as normal photos whenever parser behavior changes.
+2. Run `make test`; run `make test-ui` in an isolated display when changing GTK behavior.
+3. Test malformed inputs as well as normal files whenever parser or renderer behavior changes. Prefer synthetic fixtures.
 4. Keep input and decoding limits explicit. A compatibility improvement must not silently remove a safety boundary.
-5. Explain which Sushi and Ubuntu versions were tested.
+5. Explain which desktop, distribution, and relevant renderer versions were tested.
 
 ## Test files and privacy
 

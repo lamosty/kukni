@@ -15,10 +15,11 @@ This is a direction, not a promise or release schedule. Each milestone should re
 - Implement the Nautilus preview D-Bus contract and preserve one session across navigation.
 - Add a capability-based renderer registry and universal metadata/text/hex fallback.
 - Treat `ready`, `fallback`, and `error` as in-window states; only explicit close actions end the session.
-- Add native image, text/source, and PDF renderers.
-- Move audio/video decoding into a disposable, network-denied worker with CPU, memory, output, and wall-clock limits before enabling automatic media routing.
-- Add locked-down rendered HTML with a source-view toggle.
-- Add bounded Office conversion for XLSX, DOCX, and PPTX, with spreadsheet sheet navigation as a follow-up.
+- Add native text/source and XLSX renderers plus sandbox-gated HTML and fit-page PDF previews.
+- Add a standalone image/RAW renderer, reusing the bounded CR2 extractor without decoding untrusted images in the GTK process.
+- Finish the existing disposable, network-denied media worker with an aggregate process-tree/no-fork limit and packaged-sandbox integration tests before enabling its bounded static preview route. Interactive playback remains a later IPC project.
+- Add a source-view toggle to the existing locked-down HTML renderer.
+- Add bounded DOCX and PPTX conversion; extend XLSX with sheet navigation and richer formatting.
 - Add smooth zoom and pan, fit, 100% view, fullscreen, and keyboard-first controls.
 
 ## 0.3 — Camera workflow

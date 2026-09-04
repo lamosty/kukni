@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest tagged release on a best-effort basis. The plugin is currently tested only with GNOME Sushi 46 on Ubuntu 24.04.
+Kukni has not published a tagged release yet. Security fixes are applied to the latest `main` revision on a best-effort basis during this pre-release period. The legacy CR2 plugin is currently tested only with GNOME Sushi 46 on Ubuntu 24.04; the standalone GTK app remains a source-only prototype.
 
 ## Reporting a vulnerability
 
@@ -12,4 +12,8 @@ Include the affected version, operating system, Sushi version, impact, and the s
 
 ## Security boundaries
 
-Kukni runs as the logged-in desktop user. It does not provide isolation from the host or from GdkPixbuf; its limits are defense in depth against malformed local files. The helper is designed to read only the selected regular file, write the extracted preview only to stdout, make no network connections, and terminate when Sushi closes the preview.
+Kukni runs as the logged-in desktop user. Every selected path and file byte is treated as untrusted data; Kukni never executes the selected file or hands it to a shell or default application.
+
+The legacy CR2 adapter does not isolate GdkPixbuf from the host. Its extraction and decoding limits are defense in depth, and it should be used with the same caution as other desktop image viewers.
+
+The standalone prototype uses bounded native parsing for simple formats and requires sandbox availability for HTML and PDF rendering. Its media worker has a network/PID namespace, fixed descriptor access, per-process resource limits, a hard parent deadline, and strict raw-frame validation. Automatic media routing remains disabled until an aggregate process-tree/no-fork limit and packaged sandbox integration tests are complete. When a required boundary is unavailable, the renderer must fall back without weakening or disabling the sandbox.

@@ -5,7 +5,7 @@
 
 **Press Space. See the file.**
 
-Kukni is an open-source project for fast, native-feeling file previews on Linux. Its first working backend adds instant Canon CR2 previews to GNOME Files (Nautilus) through Sushi; the project is growing into an independent preview app with broad format support.
+Kukni is an open-source project for fast, native-feeling file previews on Linux. Its first working backend adds instant Canon CR2 previews to GNOME Files (Nautilus) through Sushi. A source-only standalone GTK prototype now provides the foundation for broader, continuous previews without inheriting Sushi's UI limitations.
 
 Select a `.cr2` file in Files and press <kbd>Space</kbd>. Kukni finds the camera-generated JPEG already embedded in the CR2 and displays it without developing or altering the RAW image.
 
@@ -13,15 +13,15 @@ _Kukni_ is colloquial Slovak for “take a look.”
 
 ## Current status
 
-- The working preview backend supports Canon CR2 files with an embedded display JPEG.
-- The legacy desktop adapter is tested on Ubuntu 24.04 with GNOME Sushi 46.
-- Uses Sushi's legacy per-user viewer interface. Sushi 51 and newer have a different plugin API and are not currently supported.
-- Local files only; remote `Gio.File` locations fall back to Sushi's normal behavior.
-- The standalone prototype keeps its in-process audio/video renderer out of automatic routing. Media files use the universal fallback until decoding runs in a disposable, resource-bounded worker.
+- The usable legacy adapter previews Canon CR2 files containing an embedded display JPEG. It is tested on Ubuntu 24.04 with GNOME Sushi 46; Sushi 51 and newer use a different plugin API.
+- The standalone prototype has one persistent GTK window, Nautilus D-Bus navigation, stable fallback states, bounded text/source previews, native XLSX tables, fit-page PDF rendering, and locked-down HTML where the required sandbox is available.
+- The standalone app is currently run from source. The installer below installs only the legacy CR2/Sushi adapter and does **not** replace the live Space-key preview service with Kukni.
+- An isolated media worker and strict parent supervisor can produce a bounded video frame or audio metadata without display, sound-server, home-directory, or network access. Automatic media routing remains disabled until aggregate process-tree limits and real packaged-sandbox integration tests are complete.
+- Standalone previews accept local regular files only. Remote locations receive an in-window explanation rather than being fetched.
 
 The RAW extractor is distro-neutral plain Python. The current desktop adapter is version-sensitive because it integrates with Sushi; the planned standalone viewer and Flatpak distribution remove that limitation. Kukni is not a RAW editor or a replacement for [LibRaw](https://www.libraw.org/).
 
-## Install
+## Install the CR2 compatibility adapter
 
 Install Sushi first. On Debian and Ubuntu:
 
@@ -62,7 +62,17 @@ The installer writes only these two files:
 
 It refuses to overwrite different files unless `--force` is explicitly supplied.
 
-## How it works
+## Try the standalone prototype
+
+The standalone app is for development testing and is not installed by `install.sh`. On a system with its GTK4, libadwaita, Python GI, and renderer dependencies available, open one local file with:
+
+```sh
+./bin/kukni /path/to/file
+```
+
+This opens Kukni directly; it does not change which application owns Nautilus's Space-key preview integration. Use synthetic or trusted local files while developing. See [Architecture](docs/ARCHITECTURE.md) for the current containment boundaries.
+
+## How the CR2 adapter works
 
 ```text
 Nautilus → Sushi integration → bounded Kukni extractor → embedded JPEG → GdkPixbuf

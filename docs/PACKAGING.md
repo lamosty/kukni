@@ -16,6 +16,8 @@ The standalone app will define stable locations for:
 
 Packages must not overwrite the system GNOME Sushi activation file. A user-level compatibility adapter must be explicit, reversible, and conflict-checked.
 
+Ubuntu's AppArmor policy restricts unprivileged user namespaces for unconfined applications. A package that enables bubblewrap-backed PDF, HTML, or media workers must ship and test a narrowly scoped AppArmor profile granting only the namespace capability those sandboxes require. Kukni must fall back rather than disable a renderer sandbox when that profile or another supported containment environment is unavailable.
+
 ## Release progression
 
 ### 1. Source and release artifacts
