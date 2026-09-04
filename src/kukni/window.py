@@ -58,7 +58,11 @@ class PreviewWindow(Adw.ApplicationWindow):
         )
         self.set_size_request(680, 440)
         self._session = PreviewSession()
-        self._renderer_registry = renderer_registry or default_registry()
+        self._renderer_registry = (
+            renderer_registry
+            if renderer_registry is not None
+            else default_registry()
+        )
         self._cancellable: Gio.Cancellable | None = None
         self._current_file: Gio.File | None = None
         self._external_parent_handle = ""
@@ -164,17 +168,20 @@ class PreviewWindow(Adw.ApplicationWindow):
         result: Gio.AsyncResult,
         token: PreviewToken,
     ) -> None:
-        if not self._is_current(token):
-            return
         try:
             info = file.query_info_finish(result)
         except GLib.Error as error:
-            if error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED):
+            if (
+                error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED)
+                or not self._is_current(token)
+            ):
                 return
             if self._session.resolve(token, PreviewState.ERROR, error.message):
                 self._show_error(file.get_basename() or "File", error.message)
             return
 
+        if not self._is_current(token):
+            return
         self._set_file_title(info)
         try:
             renderer = self._renderer_registry.select(file, info)
@@ -192,6 +199,8 @@ class PreviewWindow(Adw.ApplicationWindow):
                 info,
                 self._cancellable,
                 lambda widget, subtitle: self._on_renderer_ready(
+                    file,
+                    info,
                     token,
                     widget,
                     subtitle,
@@ -208,13 +217,28 @@ class PreviewWindow(Adw.ApplicationWindow):
 
     def _on_renderer_ready(
         self,
+        file: Gio.File,
+        info: Gio.FileInfo,
         token: PreviewToken,
         widget: Gtk.Widget,
         subtitle: str,
     ) -> None:
-        if not self._session.resolve(token, PreviewState.PREVIEW, subtitle):
+        if not self._is_current(token):
             return
-        self._title.set_subtitle(subtitle)
+        if not isinstance(widget, Gtk.Widget) or widget.get_parent() is not None:
+            self._show_fallback(
+                file,
+                info,
+                token,
+                "Renderer returned an invalid view",
+                notify=True,
+            )
+            return
+        safe_subtitle = subtitle.strip() if isinstance(subtitle, str) else ""
+        safe_subtitle = safe_subtitle or "Preview"
+        if not self._session.resolve(token, PreviewState.PREVIEW, safe_subtitle):
+            return
+        self._title.set_subtitle(safe_subtitle)
         self._replace_content(widget, "content")
 
     def _on_renderer_error(
@@ -235,20 +259,38 @@ class PreviewWindow(Adw.ApplicationWindow):
         *,
         notify: bool = False,
     ) -> None:
+        if not self._is_current(token):
+            return
+        try:
+            view = FallbackView(file, info, self._cancellable)
+        except Exception as error:
+            if self._session.resolve(token, PreviewState.ERROR, str(error)):
+                self._show_error(
+                    info.get_display_name() or file.get_basename() or "File",
+                    "File details could not be displayed",
+                )
+            return
         if not self._session.resolve(token, PreviewState.FALLBACK, detail):
             return
-        self._replace_content(
-            FallbackView(file, info, self._cancellable),
-            "content",
-        )
+        try:
+            self._replace_content(view, "content")
+        except Exception:
+            self._show_error(
+                info.get_display_name() or file.get_basename() or "File",
+                "File details could not be displayed",
+            )
         if notify:
             self.show_toast("Rich preview unavailable · showing file details")
 
     def _set_file_title(self, info: Gio.FileInfo) -> None:
-        self._title.set_title(info.get_display_name())
+        content_type = info.get_content_type()
+        description = (
+            Gio.content_type_get_description(content_type) if content_type else None
+        )
+        self._title.set_title(info.get_display_name() or "Untitled")
         self._title.set_subtitle(
-            Gio.content_type_get_description(info.get_content_type())
-            or info.get_content_type()
+            description
+            or content_type
             or "Unknown file type"
         )
 
