@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.github.lamosty.Kukni
+Exec=@KUKNI_EXEC@ --gapplication-service

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Copyright (C) 2026 Kukni contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+set -eu
+
+launcher_path=$(readlink -f -- "$0")
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")" && pwd)
+PYTHONDONTWRITEBYTECODE=1
+export PYTHONDONTWRITEBYTECODE
+exec /usr/bin/python3 -B "$launcher_dir/../bin/kukni" "$@"

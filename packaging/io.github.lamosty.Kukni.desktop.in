@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Kukni
+GenericName=File Previewer
+Comment=Preview files without opening them
+Exec=@KUKNI_EXEC@ %U
+Icon=system-file-manager
+Terminal=false
+DBusActivatable=true
+Categories=Utility;FileTools;
+StartupNotify=true
