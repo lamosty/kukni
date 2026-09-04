@@ -21,7 +21,14 @@ jobs:
       - name: Install runtime test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends gjs gnome-sushi
+          sudo apt-get install --yes --no-install-recommends \
+            gir1.2-adw-1 \
+            gir1.2-gst-plugins-base-1.0 \
+            gir1.2-gstreamer-1.0 \
+            gir1.2-gtk-4.0 \
+            gjs \
+            gnome-sushi \
+            python3-gi
 
       - name: Run tests
         run: make test
