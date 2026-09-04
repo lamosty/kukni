@@ -11,6 +11,12 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, GObject, Gtk
 
+try:
+    gi.require_version("GdkWayland", "4.0")
+    from gi.repository import GdkWayland
+except (ImportError, ValueError):  # pragma: no cover - backend dependent
+    GdkWayland = None
+
 from .renderers.fallback import FallbackView
 from .session import Direction, PreviewSession, PreviewState, PreviewToken
 
@@ -49,6 +55,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         self._session = PreviewSession()
         self._cancellable: Gio.Cancellable | None = None
         self._current_file: Gio.File | None = None
+        self._external_parent_handle = ""
 
         self._title = Adw.WindowTitle(title="Kukni", subtitle="Quick Look for Linux")
         header = Adw.HeaderBar()
@@ -77,6 +84,7 @@ class PreviewWindow(Adw.ApplicationWindow):
 
         self._install_actions()
         self.connect("close-request", self._on_close_request)
+        self.connect("realize", lambda *_args: self._apply_external_parent())
 
     @property
     def session(self) -> PreviewSession:
@@ -104,6 +112,12 @@ class PreviewWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("loading")
         self.present()
 
+        if not file.is_native():
+            message = "Remote files are not read until portal-based access is available"
+            if self._session.resolve(token, PreviewState.ERROR, message):
+                self._show_error(file.get_basename() or "Remote file", message)
+            return
+
         file.query_info_async(
             FILE_ATTRIBUTES,
             Gio.FileQueryInfoFlags.NONE,
@@ -118,6 +132,25 @@ class PreviewWindow(Adw.ApplicationWindow):
 
     def show_toast(self, message: str) -> None:
         self._toast_overlay.add_toast(Adw.Toast(title=message))
+
+    def set_external_parent_handle(self, handle: str) -> None:
+        self._external_parent_handle = handle if len(handle) <= 4096 else ""
+        self._apply_external_parent()
+
+    def _apply_external_parent(self) -> None:
+        if not self._external_parent_handle or GdkWayland is None:
+            return
+        surface = self.get_surface()
+        if surface is None:
+            return
+        prefix = "wayland:"
+        if (
+            self._external_parent_handle.startswith(prefix)
+            and isinstance(surface, GdkWayland.WaylandToplevel)
+        ):
+            surface.set_transient_for_exported(
+                self._external_parent_handle[len(prefix) :]
+            )
 
     def _on_info_ready(
         self,

@@ -14,6 +14,8 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+from .nautilus_previewer import NautilusPreviewerService
+from .session import Direction
 from .window import PreviewWindow
 
 
@@ -27,6 +29,31 @@ class KukniApplication(Adw.Application):
             flags=Gio.ApplicationFlags.HANDLES_OPEN,
         )
         self._window: PreviewWindow | None = None
+        self._previewer = NautilusPreviewerService(
+            self._show_file_from_previewer,
+            self._close_from_previewer,
+        )
+
+    def do_dbus_register(
+        self,
+        connection: Gio.DBusConnection,
+        object_path: str,
+    ) -> bool:
+        if not Adw.Application.do_dbus_register(self, connection, object_path):
+            return False
+        try:
+            self._previewer.register(connection)
+        except GLib.Error as error:
+            print(f"Kukni previewer integration unavailable: {error.message}", file=sys.stderr)
+        return True
+
+    def do_dbus_unregister(
+        self,
+        connection: Gio.DBusConnection,
+        object_path: str,
+    ) -> None:
+        self._previewer.unregister()
+        Adw.Application.do_dbus_unregister(self, connection, object_path)
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -53,18 +80,43 @@ class KukniApplication(Adw.Application):
             self._window = PreviewWindow(self)
             self._window.connect("destroy", self._on_window_destroyed)
             self._window.connect("navigation-requested", self._on_navigation_requested)
+            self._window.connect(
+                "notify::visible",
+                lambda window, _parameter: self._previewer.set_visible(
+                    window.get_visible()
+                ),
+            )
         return self._window
 
     def _on_window_destroyed(self, window: PreviewWindow) -> None:
         if self._window is window:
             self._window = None
+        self._previewer.set_visible(False)
 
     def _on_navigation_requested(
         self,
         window: PreviewWindow,
-        _direction: str,
+        direction: str,
     ) -> None:
-        window.show_toast("File-manager navigation is not connected yet")
+        if not self._previewer.emit_selection(Direction(direction)):
+            window.show_toast("File-manager navigation is not connected yet")
+
+    def _show_file_from_previewer(
+        self,
+        uri: str,
+        parent_handle: str,
+        close_if_already_shown: bool,
+    ) -> None:
+        window = self._ensure_window()
+        window.set_external_parent_handle(parent_handle)
+        window.show_file(
+            Gio.File.new_for_uri(uri),
+            close_if_already_shown=close_if_already_shown,
+        )
+
+    def _close_from_previewer(self) -> None:
+        if self._window is not None:
+            self._window.close()
 
     @staticmethod
     def _load_styles() -> None:
