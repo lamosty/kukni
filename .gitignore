@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.coverage
+.venv/
+htmlcov/
+
+# Never commit camera originals or generated preview images by accident.
+*.cr2
+*.CR2
+*.cr3
+*.CR3
+*.dng
+*.DNG
+*.raw
+*.RAW
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
