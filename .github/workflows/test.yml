@@ -26,8 +26,6 @@ jobs:
             gir1.2-gst-plugins-base-1.0 \
             gir1.2-gstreamer-1.0 \
             gir1.2-gtk-4.0 \
-            gjs \
-            gnome-sushi \
             python3-gi
 
       - name: Run tests
