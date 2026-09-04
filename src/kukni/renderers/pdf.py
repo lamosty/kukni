@@ -10,7 +10,6 @@ from dataclasses import dataclass
 import functools
 import os
 import shutil
-import signal
 import stat
 import subprocess
 import tempfile
@@ -23,8 +22,8 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
+from ..worker import probe_bwrap_user_namespace, terminate_process_group
 from .base import ErrorCallback, ReadyCallback
-from .html import probe_bwrap_user_namespace
 
 
 PDF_CONTENT_TYPES = frozenset(
@@ -262,10 +261,10 @@ def render_pdf_first_page(
         deadline = time.monotonic() + limits.wall_timeout_seconds
         while process.poll() is None:
             if cancelled is not None and cancelled():
-                _terminate_process(process)
+                terminate_process_group(process)
                 raise PdfPreviewCancelled("PDF preview cancelled")
             if time.monotonic() >= deadline:
-                _terminate_process(process)
+                terminate_process_group(process)
                 raise PdfPreviewError("PDF preview timed out")
             try:
                 process.wait(timeout=0.05)
@@ -280,7 +279,7 @@ def render_pdf_first_page(
         return png
     finally:
         if process is not None and process.poll() is None:
-            _terminate_process(process)
+            terminate_process_group(process)
         if input_descriptor >= 0:
             os.close(input_descriptor)
         if snapshot is not None:
@@ -406,28 +405,6 @@ def _validate_png_dimensions(data: bytes, max_edge: int) -> tuple[int, int]:
     ):
         raise PdfPreviewError("The rendered PDF page has unsafe dimensions")
     return width, height
-
-
-def _terminate_process(process: subprocess.Popen) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except (OSError, ProcessLookupError):
-        process.terminate()
-    try:
-        process.wait(timeout=0.5)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (OSError, ProcessLookupError):
-        process.kill()
-    try:
-        process.wait(timeout=0.5)
-    except subprocess.TimeoutExpired:
-        pass
 
 
 def _check_cancelled(cancelled: CancellationCheck | None) -> None:

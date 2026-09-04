@@ -3,7 +3,6 @@
 
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -158,6 +157,11 @@ class RendererCapabilityTests(unittest.TestCase):
                 )
             )
 
+    def test_original_probe_import_path_remains_available(self):
+        from kukni.worker import probe_bwrap_user_namespace as worker_probe
+
+        self.assertIs(probe_bwrap_user_namespace, worker_probe)
+
     def test_apparmor_restriction_rejects_an_unconfined_process(self):
         self.assertFalse(
             user_namespace_policy_allows_sandbox(
@@ -206,27 +210,6 @@ class RendererCapabilityTests(unittest.TestCase):
                 **{**common, "max_user_namespaces": "0"}
             )
         )
-
-    def test_bwrap_probe_requires_a_successful_child(self):
-        with mock.patch("kukni.renderers.html.subprocess.run") as run:
-            run.return_value.returncode = 0
-            self.assertTrue(probe_bwrap_user_namespace("/usr/bin/bwrap", "/bin/true"))
-            command = run.call_args.args[0]
-            self.assertIn("--unshare-all", command)
-            self.assertIn("--die-with-parent", command)
-            self.assertEqual(command[-1], "/bin/true")
-
-            run.return_value.returncode = 1
-            self.assertFalse(probe_bwrap_user_namespace("/usr/bin/bwrap", "/bin/true"))
-
-    def test_bwrap_probe_fails_closed_on_timeout(self):
-        with mock.patch(
-            "kukni.renderers.html.subprocess.run",
-            side_effect=subprocess.TimeoutExpired("bwrap", 3),
-        ):
-            self.assertFalse(
-                probe_bwrap_user_namespace("/usr/bin/bwrap", "/bin/true")
-            )
 
     def test_runtime_gate_requires_the_active_bwrap_probe(self):
         with (

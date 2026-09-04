@@ -10,7 +10,6 @@ import html
 import os
 import shutil
 import stat
-import subprocess
 import threading
 from collections.abc import Callable
 
@@ -19,6 +18,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk
 
+# Keep the original HTML-module import path while the shared worker module owns
+# the implementation.
+from ..worker import probe_bwrap_user_namespace
 from .base import ErrorCallback, ReadyCallback
 
 try:
@@ -153,32 +155,6 @@ def _read_kernel_value(path: str) -> str | None:
         return None
     finally:
         os.close(descriptor)
-
-
-def probe_bwrap_user_namespace(bwrap_path: str, true_path: str) -> bool:
-    """Probe the exact primitive WebKit needs in an isolated child process."""
-
-    try:
-        result = subprocess.run(
-            (
-                bwrap_path,
-                "--unshare-all",
-                "--die-with-parent",
-                "--ro-bind",
-                "/",
-                "/",
-                "--",
-                true_path,
-            ),
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
 
 
 @functools.lru_cache(maxsize=1)
