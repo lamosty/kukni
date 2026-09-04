@@ -10,23 +10,50 @@ controls that process and everything it writes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import fcntl
 import json
 import math
 import os
 from pathlib import Path
+import shutil
 import stat
+import subprocess
+import tempfile
+import threading
+import time
 from typing import Any
+
+from .worker import probe_bwrap_user_namespace, terminate_process_group
 
 
 PROTOCOL_VERSION = 1
 FRAME_FORMAT_RGBA8 = "rgba8"
 FRAME_FORMAT_NONE = "none"
+WORKER_POLL_SECONDS = 0.05
+BWRAP_PROBE_TIMEOUT_SECONDS = 3.0
+_TRUSTED_EXECUTABLE_DIRECTORIES = (Path("/usr/bin"), Path("/bin"))
+
+
+CancellationCheck = Callable[[], bool]
+ProcessFactory = Callable[..., Any]
+RuntimeProbe = Callable[[str, str], bool]
+Clock = Callable[[], float]
+
+
+# @constraint Each decoder can consume the full per-process resource allowance.
+# Keep admission bounded even though this supervisor is not automatic-route
+# eligible until it also has aggregate process-tree limits or a no-fork policy.
+_WORKER_SLOTS = threading.BoundedSemaphore(2)
 
 
 class MediaWorkerError(RuntimeError):
     """A worker request or result violated the media preview contract."""
+
+
+class MediaWorkerCancelled(Exception):
+    """Media preparation stopped because its preview request was superseded."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +118,14 @@ class MediaWorkerResult:
     @property
     def has_frame(self) -> bool:
         return self.frame_format == FRAME_FORMAT_RGBA8
+
+
+@dataclass(frozen=True, slots=True)
+class MediaWorkerOutput:
+    """One fully validated worker result and its immutable raw frame bytes."""
+
+    result: MediaWorkerResult
+    frame: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,11 +338,12 @@ def build_media_worker_launch(
 ) -> MediaWorkerLaunch:
     """Build the fixed, network-denied process boundary for one media file."""
 
-    # @constraint RLIMIT values are inherited but accounted per process.  Before
-    # this launcher is eligible for automatic routing, its supervisor must also
-    # enforce a process-tree memory/task budget (for example, a delegated cgroup)
-    # or a no-fork policy.  The wall-clock supervisor must also terminate the
-    # complete sandbox process tree on every timeout and cancellation.
+    # @constraint --unshare-all supplies the PID namespace and --die-with-parent
+    # makes bubblewrap tear down sandbox children when its launcher dies.  That is
+    # the intended process-tree quiescence property before outputs are accepted.
+    # Automatic routing remains blocked until a real integration test proves
+    # that property and either a delegated cgroup enforces aggregate memory/tasks
+    # or the worker has a no-fork policy; RLIMIT values apply only per process.
 
     validate_worker_descriptors(
         input_fd=input_fd,
@@ -445,3 +481,395 @@ def build_media_worker_launch(
         *sandbox_command,
     ]
     return MediaWorkerLaunch(argv=tuple(command), pass_fds=descriptors)
+
+
+def run_media_worker(
+    path: str | os.PathLike[str],
+    *,
+    limits: MediaWorkerLimits = DEFAULT_LIMITS,
+    cancelled: CancellationCheck | None = None,
+    bwrap_path: str | os.PathLike[str] | None = None,
+    prlimit_path: str | os.PathLike[str] | None = None,
+    python_path: str | os.PathLike[str] | None = None,
+    worker_path: str | os.PathLike[str] | None = None,
+    true_path: str | os.PathLike[str] | None = None,
+    process_factory: ProcessFactory = subprocess.Popen,
+    runtime_probe: RuntimeProbe | None = None,
+    clock: Clock = time.monotonic,
+) -> MediaWorkerOutput:
+    """Run one decoder behind the committed sandbox and validate all output.
+
+    The selected path is opened exactly once by the parent.  The worker receives
+    only that read-only descriptor and two new private output descriptors; it
+    cannot ask the parent to reopen a worker-controlled path or error message.
+
+    @constraint O_NONBLOCK prevents FIFO/device opens from waiting, but Linux
+    cannot cancel an individual pathname-resolution/open syscall.  A stalled
+    filesystem syscall can therefore outlive this userspace monotonic deadline.
+    """
+
+    _check_cancelled(cancelled)
+    deadline = clock() + limits.wall_timeout_seconds
+    slot_acquired = False
+    input_fd = -1
+    frame_fd = -1
+    result_fd = -1
+    output_directory: str | None = None
+    process: Any | None = None
+    try:
+        _acquire_worker_slot(cancelled, deadline=deadline, clock=clock)
+        slot_acquired = True
+        _check_cancelled(cancelled)
+
+        runtime = _resolve_media_worker_runtime(
+            bwrap_path=bwrap_path,
+            prlimit_path=prlimit_path,
+            python_path=python_path,
+            worker_path=worker_path,
+            true_path=true_path,
+        )
+        probe = probe_bwrap_user_namespace if runtime_probe is None else runtime_probe
+        if runtime_probe is None or probe is probe_bwrap_user_namespace:
+            _require_default_probe_budget(deadline, clock)
+        try:
+            sandbox_ready = probe(runtime[0], runtime[4])
+        except Exception as error:
+            raise MediaWorkerError("the media worker sandbox is unavailable") from error
+        if sandbox_ready is not True:
+            raise MediaWorkerError("the media worker sandbox is unavailable")
+        _check_deadline(deadline, clock)
+        _check_cancelled(cancelled)
+
+        input_fd, input_snapshot = _open_media_input(path, limits)
+        _check_cancelled(cancelled)
+        output_directory, frame_fd, result_fd = _create_private_outputs()
+
+        try:
+            launch = build_media_worker_launch(
+                bwrap_path=runtime[0],
+                prlimit_path=runtime[1],
+                python_path=runtime[2],
+                worker_path=runtime[3],
+                input_fd=input_fd,
+                frame_fd=frame_fd,
+                result_fd=result_fd,
+                limits=limits,
+            )
+        except (OSError, ValueError) as error:
+            raise MediaWorkerError("the media worker could not be prepared") from error
+
+        _check_cancelled(cancelled)
+        _check_deadline(deadline, clock)
+        try:
+            process = process_factory(
+                launch.argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                pass_fds=launch.pass_fds,
+                start_new_session=True,
+                env=dict(launch.environment),
+            )
+        except (OSError, subprocess.SubprocessError, ValueError) as error:
+            raise MediaWorkerError("the media worker could not start") from error
+
+        returncode = _wait_for_media_worker(
+            process,
+            cancelled=cancelled,
+            deadline=deadline,
+            clock=clock,
+        )
+        if returncode != 0:
+            raise MediaWorkerError("the media worker failed")
+        _check_cancelled(cancelled)
+
+        result_payload = _read_bounded_output(
+            result_fd,
+            limits.max_result_bytes,
+        )
+        frame = _read_bounded_output(frame_fd, limits.max_frame_bytes)
+        _check_cancelled(cancelled)
+        try:
+            result = parse_worker_result(result_payload, limits=limits)
+            validate_frame_bytes(frame, result, limits=limits)
+        except MediaWorkerError as error:
+            # @constraint Protocol diagnostics are fixed parent strings.  Never
+            # surface stderr, JSON fields, or any other decoder-controlled text.
+            raise MediaWorkerError("the media worker returned invalid output") from error
+
+        _ensure_input_unchanged(input_fd, input_snapshot)
+        _check_cancelled(cancelled)
+        _check_deadline(deadline, clock)
+        return MediaWorkerOutput(result=result, frame=frame)
+    except _MediaWorkerTimedOut as error:
+        raise MediaWorkerError("the media worker timed out") from error
+    finally:
+        if process is not None:
+            # Lifecycle cleanup is best-effort and must never replace the fixed
+            # public error/cancellation already selected by the supervisor.
+            try:
+                terminate_process_group(process)
+            except BaseException:
+                pass
+        for descriptor in (result_fd, frame_fd, input_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        if output_directory is not None:
+            shutil.rmtree(output_directory, ignore_errors=True)
+        if slot_acquired:
+            _WORKER_SLOTS.release()
+
+
+class _MediaWorkerTimedOut(Exception):
+    """Internal marker used to keep timeout text parent-controlled."""
+
+
+@dataclass(frozen=True, slots=True)
+class _InputSnapshot:
+    device: int
+    inode: int
+    mode: int
+    links: int
+    size: int
+    modified_ns: int
+    changed_ns: int
+
+
+def _resolve_media_worker_runtime(
+    *,
+    bwrap_path: str | os.PathLike[str] | None,
+    prlimit_path: str | os.PathLike[str] | None,
+    python_path: str | os.PathLike[str] | None,
+    worker_path: str | os.PathLike[str] | None,
+    true_path: str | os.PathLike[str] | None,
+) -> tuple[str, str, str, str, str]:
+    bwrap = _require_executable(bwrap_path, "bwrap")
+    prlimit = _require_executable(prlimit_path, "prlimit")
+    python = _require_executable(python_path, "python3")
+    true = _require_executable(true_path, "true")
+
+    try:
+        candidate = (
+            Path(os.fspath(worker_path))
+            if worker_path is not None
+            else Path(__file__).resolve().parents[2]
+            / "helpers"
+            / "kukni-media-worker.py"
+        )
+    except TypeError as error:
+        raise MediaWorkerError("the media worker helper is unavailable") from error
+    if not candidate.is_absolute():
+        raise MediaWorkerError("the media worker helper is unavailable")
+    # @constraint The app-owned helper is in the same-code trust domain, but
+    # bubblewrap currently opens this path after validation.  Pinning its inode
+    # through another passed FD requires coordinated launcher/packaging changes
+    # and remains a follow-up; do not weaken these same-code runtime checks.
+    try:
+        candidate = candidate.resolve(strict=True)
+        metadata = candidate.stat()
+    except (OSError, RuntimeError) as error:
+        raise MediaWorkerError("the media worker helper is unavailable") from error
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(candidate, os.R_OK):
+        raise MediaWorkerError("the media worker helper is unavailable")
+    return bwrap, prlimit, python, os.fspath(candidate), true
+
+
+def _require_executable(
+    configured_path: str | os.PathLike[str] | None,
+    command_name: str,
+) -> str:
+    if configured_path is None:
+        candidates = tuple(
+            directory / command_name
+            for directory in _TRUSTED_EXECUTABLE_DIRECTORIES
+        )
+    else:
+        try:
+            candidate = os.fspath(configured_path)
+        except TypeError as error:
+            raise MediaWorkerError("a media worker runtime tool is unavailable") from error
+        if (
+            not isinstance(candidate, str)
+            or not candidate
+            or not os.path.isabs(candidate)
+        ):
+            raise MediaWorkerError("a media worker runtime tool is unavailable")
+        candidates = (Path(candidate),)
+
+    for candidate_path in candidates:
+        try:
+            resolved = candidate_path.resolve(strict=True)
+            metadata = resolved.stat()
+        except (OSError, RuntimeError):
+            continue
+        if stat.S_ISREG(metadata.st_mode) and os.access(resolved, os.X_OK):
+            return os.fspath(resolved)
+    raise MediaWorkerError("a media worker runtime tool is unavailable")
+
+
+def _acquire_worker_slot(
+    cancelled: CancellationCheck | None,
+    *,
+    deadline: float,
+    clock: Clock,
+) -> None:
+    while True:
+        _check_cancelled(cancelled)
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise _MediaWorkerTimedOut
+        if _WORKER_SLOTS.acquire(timeout=min(WORKER_POLL_SECONDS, remaining)):
+            return
+
+
+def _check_deadline(deadline: float, clock: Clock) -> None:
+    if clock() >= deadline:
+        raise _MediaWorkerTimedOut
+
+
+def _require_default_probe_budget(deadline: float, clock: Clock) -> None:
+    # Keep this synchronized with worker.probe_bwrap_user_namespace's bounded
+    # subprocess timeout.  Injected probes are test/config seams and declare
+    # their own timing behavior; only the synchronous default needs this guard.
+    if deadline - clock() < BWRAP_PROBE_TIMEOUT_SECONDS:
+        raise _MediaWorkerTimedOut
+
+
+def _open_media_input(
+    path: str | os.PathLike[str],
+    limits: MediaWorkerLimits,
+) -> tuple[int, _InputSnapshot]:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        descriptor = os.open(os.fspath(path), flags)
+    except (OSError, TypeError) as error:
+        raise MediaWorkerError("the media input could not be opened safely") from error
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise MediaWorkerError("media preview requires a regular local file")
+        if metadata.st_size <= 0:
+            raise MediaWorkerError("the media input is empty")
+        if metadata.st_size > limits.max_input_bytes:
+            raise MediaWorkerError("the media input exceeds the size limit")
+        return descriptor, _snapshot_input(metadata)
+    except OSError as error:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise MediaWorkerError("the media input could not be inspected safely") from error
+    except Exception:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+
+
+def _snapshot_input(metadata: os.stat_result) -> _InputSnapshot:
+    return _InputSnapshot(
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        mode=metadata.st_mode,
+        links=metadata.st_nlink,
+        size=metadata.st_size,
+        modified_ns=metadata.st_mtime_ns,
+        changed_ns=metadata.st_ctime_ns,
+    )
+
+
+def _create_private_outputs() -> tuple[str, int, int]:
+    directory: str | None = None
+    frame_fd = -1
+    result_fd = -1
+    try:
+        directory = tempfile.mkdtemp(prefix="kukni-media-worker-")
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        frame_fd = os.open(os.path.join(directory, "frame.rgba"), flags, 0o600)
+        result_fd = os.open(os.path.join(directory, "result.json"), flags, 0o600)
+        return directory, frame_fd, result_fd
+    except OSError as error:
+        for descriptor in (result_fd, frame_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        if directory is not None:
+            shutil.rmtree(directory, ignore_errors=True)
+        raise MediaWorkerError("private media worker output is unavailable") from error
+
+
+def _wait_for_media_worker(
+    process: Any,
+    *,
+    cancelled: CancellationCheck | None,
+    deadline: float,
+    clock: Clock,
+) -> int:
+    while True:
+        _check_cancelled(cancelled)
+        try:
+            returncode = process.poll()
+        except (OSError, subprocess.SubprocessError) as error:
+            raise MediaWorkerError("the media worker failed") from error
+        if returncode is not None:
+            _check_cancelled(cancelled)
+            _check_deadline(deadline, clock)
+            return int(returncode)
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise _MediaWorkerTimedOut
+        try:
+            returncode = process.wait(timeout=min(WORKER_POLL_SECONDS, remaining))
+        except subprocess.TimeoutExpired:
+            continue
+        except (OSError, subprocess.SubprocessError) as error:
+            raise MediaWorkerError("the media worker failed") from error
+        _check_cancelled(cancelled)
+        _check_deadline(deadline, clock)
+        return int(returncode)
+
+
+def _read_bounded_output(descriptor: int, limit: int) -> bytes:
+    try:
+        payload = os.pread(descriptor, limit + 1, 0)
+        size_after_read = os.fstat(descriptor).st_size
+    except OSError as error:
+        raise MediaWorkerError("the media worker returned unreadable output") from error
+    if len(payload) > limit or size_after_read > limit:
+        raise MediaWorkerError("the media worker output exceeds the size limit")
+    if len(payload) != size_after_read:
+        raise MediaWorkerError("the media worker returned invalid output")
+    return payload
+
+
+def _ensure_input_unchanged(
+    descriptor: int,
+    expected: _InputSnapshot,
+) -> None:
+    try:
+        current = _snapshot_input(os.fstat(descriptor))
+    except OSError as error:
+        raise MediaWorkerError("the media input changed during decoding") from error
+    if current != expected:
+        raise MediaWorkerError("the media input changed during decoding")
+
+
+def _check_cancelled(cancelled: CancellationCheck | None) -> None:
+    if cancelled is not None and cancelled():
+        raise MediaWorkerCancelled("media preview cancelled")
