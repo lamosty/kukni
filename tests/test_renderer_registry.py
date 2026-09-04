@@ -64,7 +64,7 @@ class RendererRegistryTests(unittest.TestCase):
     def test_default_registry_contains_the_html_renderer(self):
         self.assertEqual(
             tuple(renderer.id for renderer in default_registry().renderers),
-            ("html",),
+            ("xlsx", "html"),
         )
 
 

@@ -18,6 +18,7 @@ test-ui:
 	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_app.py
 	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_renderer_contract.py
 	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_html.py
+	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_xlsx.py
 
 test-corpus:
 	test -n "$(CR2_SAMPLE_DIR)"
