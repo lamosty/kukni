@@ -9,7 +9,11 @@ import unittest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from kukni.renderers.registry import RendererProbeError, RendererRegistry
+from kukni.renderers.registry import (
+    RendererProbeError,
+    RendererRegistry,
+    default_registry,
+)
 
 
 class FakeRenderer:
@@ -56,6 +60,12 @@ class RendererRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RendererProbeError, "broken.*bad"):
             registry.select(object(), object())
+
+    def test_default_registry_contains_the_html_renderer(self):
+        self.assertEqual(
+            tuple(renderer.id for renderer in default_registry().renderers),
+            ("html",),
+        )
 
 
 if __name__ == "__main__":

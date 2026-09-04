@@ -47,6 +47,8 @@ class RendererRegistry:
 
 
 def default_registry() -> RendererRegistry:
-    """Return the built-in registry; rich renderers register incrementally."""
+    """Return built-in rich renderers in deterministic priority order."""
 
-    return RendererRegistry()
+    from .html import HtmlRenderer
+
+    return RendererRegistry((HtmlRenderer(),))
