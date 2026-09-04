@@ -19,7 +19,11 @@ class FallbackFormattingTests(unittest.TestCase):
 
     def test_rejects_binary_and_invalid_utf8(self):
         self.assertFalse(is_probably_text(b"abc\x00def", None))
-        self.assertFalse(is_probably_text(b"\xff\xfe", None))
+        self.assertFalse(is_probably_text(b"abc\x00def", "text/plain"))
+        self.assertFalse(is_probably_text(b"\xff", None))
+
+    def test_accepts_bom_marked_unicode(self):
+        self.assertTrue(is_probably_text("ahoj".encode("utf-16"), "text/plain"))
 
     def test_formats_bounded_hex_dump(self):
         rendered = format_hex_sample(b"Hello\x00world" + bytes(range(32)), limit=16)

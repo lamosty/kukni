@@ -12,6 +12,13 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk, Pango
 
+from .text import (
+    TextPreviewError,
+    decode_text_bytes,
+    normalize_visible_text,
+    sanitize_display_label,
+)
+
 
 TEXT_SAMPLE_BYTES = 64 * 1024
 HEX_SAMPLE_BYTES = 4 * 1024
@@ -19,13 +26,9 @@ HEX_WIDTH = 16
 
 
 def is_probably_text(data: bytes, content_type: str | None) -> bool:
-    if content_type and Gio.content_type_is_a(content_type, "text/plain"):
-        return True
-    if b"\x00" in data:
-        return False
     try:
-        data.decode("utf-8")
-    except UnicodeDecodeError:
+        decode_text_bytes(data)
+    except (TextPreviewError, TypeError, ValueError):
         return False
     return True
 
@@ -84,7 +87,10 @@ class FallbackView(Gtk.Box):
 
         labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         labels.set_valign(Gtk.Align.CENTER)
-        name = Gtk.Label(label=info.get_display_name(), xalign=0)
+        name = Gtk.Label(
+            label=sanitize_display_label(info.get_display_name()),
+            xalign=0,
+        )
         name.add_css_class("title-2")
         name.set_ellipsize(Pango.EllipsizeMode.END)
         labels.append(name)
@@ -98,6 +104,9 @@ class FallbackView(Gtk.Box):
         labels.append(kind)
         identity.append(labels)
         self.append(identity)
+
+        if info.get_attribute_boolean(Gio.FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE):
+            self.append(self._executable_banner())
 
         metadata = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
         metadata.set_halign(Gtk.Align.CENTER)
@@ -122,6 +131,8 @@ class FallbackView(Gtk.Box):
         self._text = Gtk.TextView(
             editable=False,
             cursor_visible=False,
+            focusable=False,
+            accepts_tab=False,
             monospace=True,
             wrap_mode=Gtk.WrapMode.NONE,
             top_margin=16,
@@ -193,7 +204,9 @@ class FallbackView(Gtk.Box):
             self._show_message("This file is empty")
         elif is_probably_text(sample, self._info.get_content_type()):
             self._sample_title.set_label("Text sample · first 64 KiB")
-            self._text.get_buffer().set_text(sample.decode("utf-8", errors="replace"))
+            self._text.get_buffer().set_text(
+                normalize_visible_text(decode_text_bytes(sample))
+            )
         else:
             self._sample_title.set_label("Hex sample · first 4 KiB")
             self._text.get_buffer().set_text(format_hex_sample(sample))
@@ -201,6 +214,22 @@ class FallbackView(Gtk.Box):
     def _show_message(self, message: str) -> None:
         self._sample_title.set_label("Universal preview")
         self._text.get_buffer().set_text(message)
+
+    @staticmethod
+    def _executable_banner() -> Gtk.Widget:
+        banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        banner.add_css_class("card")
+        banner.set_halign(Gtk.Align.CENTER)
+        banner.append(Gtk.Image(icon_name="security-high-symbolic", pixel_size=24))
+        banner.append(
+            Gtk.Label(
+                label=(
+                    "Executable file · Kukni only inspects bytes and never runs it"
+                ),
+                wrap=True,
+            )
+        )
+        return banner
 
     def _close_stream(self) -> None:
         stream = self._stream

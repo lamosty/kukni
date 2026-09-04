@@ -19,6 +19,7 @@ except (ImportError, ValueError):  # pragma: no cover - backend dependent
 
 from .renderers.fallback import FallbackView
 from .renderers.registry import RendererRegistry, default_registry
+from .renderers.text import sanitize_display_label
 from .session import Direction, PreviewSession, PreviewState, PreviewToken
 
 
@@ -29,6 +30,7 @@ FILE_ATTRIBUTES = ",".join(
         Gio.FILE_ATTRIBUTE_STANDARD_ICON,
         Gio.FILE_ATTRIBUTE_STANDARD_SIZE,
         Gio.FILE_ATTRIBUTE_STANDARD_TYPE,
+        Gio.FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
         Gio.FILE_ATTRIBUTE_TIME_MODIFIED,
         Gio.FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
     )
@@ -117,7 +119,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         self._cancel_current_work()
         self._cancellable = Gio.Cancellable()
         self._current_file = file
-        self._title.set_title(file.get_basename() or "Untitled")
+        self._title.set_title(sanitize_display_label(file.get_basename()))
         self._title.set_subtitle("Inspecting file…")
         self._stack.set_visible_child_name("loading")
         self.present()
@@ -125,7 +127,10 @@ class PreviewWindow(Adw.ApplicationWindow):
         if not file.is_native():
             message = "Remote files are not read until portal-based access is available"
             if self._session.resolve(token, PreviewState.ERROR, message):
-                self._show_error(file.get_basename() or "Remote file", message)
+                self._show_error(
+                    sanitize_display_label(file.get_basename(), "Remote file"),
+                    message,
+                )
             return
 
         file.query_info_async(
@@ -177,7 +182,10 @@ class PreviewWindow(Adw.ApplicationWindow):
             ):
                 return
             if self._session.resolve(token, PreviewState.ERROR, error.message):
-                self._show_error(file.get_basename() or "File", error.message)
+                self._show_error(
+                    sanitize_display_label(file.get_basename(), "File"),
+                    error.message,
+                )
             return
 
         if not self._is_current(token):
@@ -287,7 +295,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         description = (
             Gio.content_type_get_description(content_type) if content_type else None
         )
-        self._title.set_title(info.get_display_name() or "Untitled")
+        self._title.set_title(sanitize_display_label(info.get_display_name()))
         self._title.set_subtitle(
             description
             or content_type

@@ -53,7 +53,14 @@ def default_registry() -> RendererRegistry:
     from .media import MediaRenderer
     from .pdf import PdfRenderer
     from .spreadsheet import SpreadsheetRenderer
+    from .text import TextRenderer
 
     return RendererRegistry(
-        (SpreadsheetRenderer(), PdfRenderer(), MediaRenderer(), HtmlRenderer())
+        (
+            SpreadsheetRenderer(),
+            PdfRenderer(),
+            MediaRenderer(),
+            HtmlRenderer(),
+            TextRenderer(),
+        )
     )

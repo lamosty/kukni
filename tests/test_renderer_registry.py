@@ -64,7 +64,7 @@ class RendererRegistryTests(unittest.TestCase):
     def test_default_registry_has_deterministic_built_in_order(self):
         self.assertEqual(
             tuple(renderer.id for renderer in default_registry().renderers),
-            ("xlsx", "pdf", "media", "html"),
+            ("xlsx", "pdf", "media", "html", "text"),
         )
 
 
