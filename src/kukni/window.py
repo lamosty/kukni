@@ -18,6 +18,7 @@ except (ImportError, ValueError):  # pragma: no cover - backend dependent
     GdkWayland = None
 
 from .renderers.fallback import FallbackView
+from .renderers.registry import RendererRegistry, default_registry
 from .session import Direction, PreviewSession, PreviewState, PreviewToken
 
 
@@ -44,7 +45,11 @@ class PreviewWindow(Adw.ApplicationWindow):
         ),
     }
 
-    def __init__(self, application: Adw.Application) -> None:
+    def __init__(
+        self,
+        application: Adw.Application,
+        renderer_registry: RendererRegistry | None = None,
+    ) -> None:
         super().__init__(
             application=application,
             title="Kukni",
@@ -53,6 +58,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         )
         self.set_size_request(680, 440)
         self._session = PreviewSession()
+        self._renderer_registry = renderer_registry or default_registry()
         self._cancellable: Gio.Cancellable | None = None
         self._current_file: Gio.File | None = None
         self._external_parent_handle = ""
@@ -169,21 +175,82 @@ class PreviewWindow(Adw.ApplicationWindow):
                 self._show_error(file.get_basename() or "File", error.message)
             return
 
-        view = FallbackView(file, info, self._cancellable)
-        if not self._session.resolve(
-            token,
-            PreviewState.FALLBACK,
-            "No rich renderer selected",
-        ):
+        self._set_file_title(info)
+        try:
+            renderer = self._renderer_registry.select(file, info)
+        except Exception as error:
+            self._show_fallback(file, info, token, str(error), notify=True)
             return
 
+        if renderer is None:
+            self._show_fallback(file, info, token, "No rich renderer selected")
+            return
+
+        try:
+            renderer.render(
+                file,
+                info,
+                self._cancellable,
+                lambda widget, subtitle: self._on_renderer_ready(
+                    token,
+                    widget,
+                    subtitle,
+                ),
+                lambda message: self._on_renderer_error(
+                    file,
+                    info,
+                    token,
+                    message,
+                ),
+            )
+        except Exception as error:
+            self._on_renderer_error(file, info, token, str(error))
+
+    def _on_renderer_ready(
+        self,
+        token: PreviewToken,
+        widget: Gtk.Widget,
+        subtitle: str,
+    ) -> None:
+        if not self._session.resolve(token, PreviewState.PREVIEW, subtitle):
+            return
+        self._title.set_subtitle(subtitle)
+        self._replace_content(widget, "content")
+
+    def _on_renderer_error(
+        self,
+        file: Gio.File,
+        info: Gio.FileInfo,
+        token: PreviewToken,
+        message: str,
+    ) -> None:
+        self._show_fallback(file, info, token, message, notify=True)
+
+    def _show_fallback(
+        self,
+        file: Gio.File,
+        info: Gio.FileInfo,
+        token: PreviewToken,
+        detail: str,
+        *,
+        notify: bool = False,
+    ) -> None:
+        if not self._session.resolve(token, PreviewState.FALLBACK, detail):
+            return
+        self._replace_content(
+            FallbackView(file, info, self._cancellable),
+            "content",
+        )
+        if notify:
+            self.show_toast("Rich preview unavailable · showing file details")
+
+    def _set_file_title(self, info: Gio.FileInfo) -> None:
         self._title.set_title(info.get_display_name())
         self._title.set_subtitle(
             Gio.content_type_get_description(info.get_content_type())
             or info.get_content_type()
             or "Unknown file type"
         )
-        self._replace_content(view, "content")
 
     def _show_error(self, filename: str, detail: str) -> None:
         page = Adw.StatusPage(

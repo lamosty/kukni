@@ -63,6 +63,17 @@ class PreviewSessionTests(unittest.TestCase):
         self.assertTrue(session.resolve(current, PreviewState.PREVIEW))
         self.assertEqual(session.snapshot.current_uri, "file:///current-b.txt")
 
+    def test_only_first_renderer_result_can_resolve_a_request(self):
+        session = PreviewSession()
+        token = session.show("file:///document.html")
+
+        self.assertTrue(session.resolve(token, PreviewState.PREVIEW, "HTML document"))
+        self.assertFalse(
+            session.resolve(token, PreviewState.FALLBACK, "late renderer failure")
+        )
+        self.assertEqual(session.snapshot.state, PreviewState.PREVIEW)
+        self.assertEqual(session.snapshot.detail, "HTML document")
+
     def test_only_explicit_actions_close_the_session(self):
         session = PreviewSession()
         first = session.show("file:///same-file")

@@ -107,7 +107,7 @@ class PreviewSession:
         if state not in self._RESULT_STATES:
             raise ValueError(f"invalid renderer result state: {state.value}")
         if (
-            self._state is PreviewState.CLOSED
+            self._state is not PreviewState.OPENING
             or token.generation != self._generation
             or token.uri != self._current_uri
         ):
