@@ -35,8 +35,14 @@ All notable changes to this project will be documented here.
 - Make the normal installation independent of GNOME Sushi.
 - Remove the original GNOME Sushi viewer adapter and its plugin-specific
   installation path.
-- Continue to provide bounded Canon CR2 embedded-JPEG extraction with synthetic
-  tests and optional private camera-corpus coverage; the extractor is not yet
-  connected to the standalone renderer registry.
+- Add automatic standalone Canon CR2 previews by extracting, orienting, and
+  decoding the embedded display JPEG in a disposable worker, then accepting
+  only strictly validated bounded raw RGBA in the GTK process.
+- Bound each CR2 worker to one global preparation, a 128 MiB input, 64 MiB
+  encoded and raw outputs, 4,096-pixel/16.8-megapixel retained frames, an
+  eight-second wall deadline, 768 MiB address space, six CPU seconds, 64 file
+  descriptors, `NPROC=0`, and verified `no_new_privs`.
+- Add synthetic CR2 renderer and worker tests plus optional private
+  camera-corpus coverage.
 - Add CI coverage for the standalone runtime and installer behavior on Ubuntu
   24.04.

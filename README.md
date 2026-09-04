@@ -26,6 +26,8 @@ _Kukni_ is colloquial Slovak for “take a look.”
 - Press <kbd>Space</kbd> on a local file in Nautilus to open or close Kukni.
 - Move with <kbd>←</kbd>, <kbd>→</kbd>, <kbd>↑</kbd>, and <kbd>↓</kbd> while the
   same preview window stays open.
+- Preview Canon CR2 photographs from the camera-generated JPEG already embedded
+  in the RAW container, without developing or altering the sensor data.
 - Read bounded, read-only previews of text, source code, configuration, logs,
   JSON, XML, CSV, Markdown, and similar files.
 - Inspect the first visible worksheet of an XLSX file without starting an
@@ -48,12 +50,37 @@ Kukni accepts local regular files only. It does not fetch remote locations.
 | XLSX | Bounded native table for the first visible worksheet; cached values only |
 | HTML | Available only with WebKitGTK 6 and a working process sandbox; scripts, network access, and broad local-file access stay disabled |
 | PDF | First page only, using Poppler inside a working bubblewrap sandbox |
-| Images and camera RAW, including CR2 | Metadata plus bounded inspection fallback; a standalone image/RAW renderer is not connected yet |
+| Canon CR2 | Camera-generated embedded JPEG, automatically oriented and fit to the window |
+| Other images and camera RAW | Metadata plus bounded inspection fallback; dedicated renderers are not connected yet |
 | Audio and video | Metadata plus bounded inspection fallback; automatic media decoding is deliberately disabled |
 | Other local files | Metadata plus a bounded text or hex sample |
 
 If an optional renderer or its sandbox is unavailable, Kukni falls back rather
 than silently weakening the safety boundary.
+
+### Fast CR2 without RAW development
+
+Canon cameras normally store an ordinary display JPEG inside each CR2 for
+on-camera review. Kukni extracts that image in a disposable worker, decodes and
+downscales it there, and gives the GTK process only validated raw RGBA pixels.
+The original CR2 is opened read-only and never altered.
+
+The default worker limits are explicit:
+
+- 128 MiB maximum CR2 input;
+- 64 MiB maximum embedded JPEG and 64 MiB maximum returned RGBA payload;
+- 32,768 pixels per source edge and 100 megapixels total;
+- 4,096 pixels per retained edge and 16.8 megapixels total;
+- one preparation at a time, held through GTK delivery;
+- an eight-second wall deadline, 768 MiB address-space limit, six CPU seconds,
+  64 open descriptors, hard `NPROC=0`, and verified
+  `PR_SET_NO_NEW_PRIVS`.
+
+The worker is killable and the parent strictly validates its output, but the
+source install cannot give it a filesystem or network namespace on the current
+Ubuntu target. During its short lifetime it still has ordinary same-user
+filesystem and network access. The descriptor-only protocol is an intended
+access boundary, not a complete sandbox.
 
 ## Install for your user
 
@@ -61,7 +88,7 @@ Kukni currently installs from source. On Ubuntu 24.04, install the core runtime
 dependencies:
 
 ```sh
-sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 util-linux
 ```
 
 Then install Kukni without `sudo`:
@@ -95,7 +122,7 @@ directory to your shell configuration.
 On Ubuntu, install the optional PDF and HTML runtime packages with:
 
 ```sh
-sudo apt install poppler-utils bubblewrap util-linux gir1.2-webkit-6.0
+sudo apt install poppler-utils bubblewrap gir1.2-webkit-6.0
 ```
 
 Installing those packages does not guarantee that the host's user-namespace

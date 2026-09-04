@@ -13,6 +13,8 @@ The current standalone app provides these controls:
   window remains open.
 - `F` or `F11` toggles fullscreen.
 - `Ctrl+O` opens a file chooser for direct-launch use.
+- Canon CR2 previews are automatically oriented, downscaled within fixed pixel
+  limits, and fit inside a stable canvas.
 
 Arrow-key folder navigation depends on a Nautilus-owned preview session. In a
 direct `kukni FILE` launch, those keys explain that file-manager navigation is
@@ -76,6 +78,8 @@ accessibility testing.
   file-manager window using the supplied parent handle.
 - The default viewport is stable instead of adopting every file's natural
   dimensions.
+- The shipped CR2 canvas fits the photograph inside that viewport without
+  requesting an outer-window resize.
 - Content changes use a restrained loading state rather than resizing the outer
   window.
 - Rich content should preserve its natural proportions and should not upscale by

@@ -11,6 +11,8 @@ The `main` branch already provides:
 - a standalone GTK4/libadwaita application;
 - per-user Nautilus D-Bus activation and continuous arrow-key navigation;
 - one persistent preview window with cancellation and stale-result protection;
+- standalone Canon CR2 previews using the embedded display JPEG in a bounded,
+  killable decoder worker that returns validated raw RGBA;
 - bounded text/source previews and a universal metadata/text/hex fallback;
 - a bounded native XLSX view that does not execute formulas or active content;
 - sandbox-gated HTML and first-page PDF routes;
@@ -18,8 +20,8 @@ The `main` branch already provides:
 - synthetic parser, renderer, integration, and install tests.
 
 This is enough to test Kukni as an independent previewer, but it is not yet a
-broad-format daily-driver release. Images, camera RAW, audio, and video currently
-use the fallback view.
+broad-format daily-driver release. Common image formats, non-CR2 camera RAW,
+audio, and video currently use the fallback view.
 
 ## 0.1 — Standalone preview release
 
@@ -33,14 +35,15 @@ Before the first tagged release:
 - publish an explicit compatibility and renderer matrix;
 - close alpha defects without weakening fallback or sandbox policy.
 
-## 0.2 — Images and camera RAW
+## 0.2 — Common images and more camera RAW
 
 Make Kukni immediately useful for the most common visual files:
 
 - add bounded JPEG, PNG, WebP, GIF, TIFF, and SVG preview paths;
-- connect the existing CR2 embedded-JPEG extractor to the standalone app;
-- keep native image decoders outside the long-lived GTK process where practical;
-- pass bounded pixel payloads—not worker-selected encoded content—back to the UI;
+- keep native image decoders outside the long-lived GTK process and pass
+  bounded pixel payloads—not worker-selected encoded content—back to the UI;
+- add a tested filesystem and network isolation boundary for the CR2 worker
+  without pretending the current descriptor-only protocol is a sandbox;
 - add fit, 100%, zoom, and pan without changing the outer window size;
 - validate orientation, transparency, and color behavior;
 - enable additional RAW families such as NEF, ARW, RAF, DNG, ORF, RW2, and PEF
