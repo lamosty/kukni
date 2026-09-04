@@ -116,6 +116,11 @@ from gi.repository import Adw, Gio, GLib, Gtk
     printf 'Install those runtime bindings with your distribution package manager, then retry.\n' >&2
     exit 1
 fi
+if [ ! -x /usr/bin/prlimit ] && [ ! -x /bin/prlimit ]; then
+    printf 'Kukni CR2 previews require prlimit from the util-linux package.\n' >&2
+    printf 'Install that runtime with your distribution package manager, then retry.\n' >&2
+    exit 1
+fi
 
 for required_source in \
     "$script_dir/bin/kukni" \
