@@ -49,15 +49,18 @@ class RendererRegistry:
 def default_registry() -> RendererRegistry:
     """Return built-in rich renderers in deterministic priority order."""
 
+    from .cr2 import Cr2Renderer
     from .html import HtmlRenderer
     from .pdf import PdfRenderer
     from .spreadsheet import SpreadsheetRenderer
     from .text import TextRenderer
 
-    # @constraint Media decoding stays opt-in until it can run in a disposable,
-    # resource-limited worker rather than inside the GTK process.
+    # @decision MediaRenderer is intentionally omitted from automatic routing.
+    # @why Re-enable it only after process-tree teardown and aggregate decoder
+    # memory/task limits (or a verified no-fork policy) are integration-tested.
     return RendererRegistry(
         (
+            Cr2Renderer(),
             SpreadsheetRenderer(),
             PdfRenderer(),
             HtmlRenderer(),

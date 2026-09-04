@@ -71,6 +71,8 @@ test "$(readlink -- "$launcher")" = '../lib/kukni/launcher/kukni' || \
     fail 'launcher symbolic link does not target the private launcher'
 cmp -- "$project_dir/packaging/kukni-launcher" "$app_root/launcher/kukni"
 cmp -- "$project_dir/bin/kukni" "$app_root/bin/kukni"
+cmp -- "$project_dir/helpers/kukni-cr2-worker.py" \
+    "$app_root/helpers/kukni-cr2-worker.py"
 cmp -- "$project_dir/helpers/kukni-extract-preview.py" \
     "$app_root/helpers/kukni-extract-preview.py"
 cmp -- "$project_dir/helpers/kukni-media-worker.py" \
