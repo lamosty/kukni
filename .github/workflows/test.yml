@@ -22,10 +22,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
+            bubblewrap \
             gir1.2-adw-1 \
             gir1.2-gst-plugins-base-1.0 \
             gir1.2-gstreamer-1.0 \
             gir1.2-gtk-4.0 \
+            poppler-utils \
             python3-gi \
             webp-pixbuf-loader \
             xvfb \
