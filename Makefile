@@ -15,6 +15,7 @@ test-ui:
 	./tests/run-ui.sh python3 tests/smoke_app.py
 	./tests/run-ui.sh python3 tests/smoke_renderer_contract.py
 	./tests/run-ui.sh python3 tests/smoke_images.py
+	./tests/run-ui.sh python3 tests/smoke_navigation.py
 	./tests/run-ui.sh python3 tests/smoke_html.py
 	./tests/run-ui.sh python3 tests/smoke_xlsx.py
 	./tests/run-ui.sh python3 tests/smoke_pdf.py

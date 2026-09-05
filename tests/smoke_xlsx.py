@@ -143,6 +143,7 @@ class XlsxSmokeApplication(Adw.Application):
             )
 
         navigation: list[str] = []
+        self.window.set_navigation_available(True)  # Synthetic attached session.
         self.window.connect(
             "navigation-requested",
             lambda _window, direction: navigation.append(direction),

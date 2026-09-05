@@ -36,3 +36,12 @@ jobs:
 
       - name: Verify real GTK previews and navigation
         run: make test-ui
+
+      # Fallback resilience is tested above; it is not proof that an ordinary
+      # installation can display PDF pages. This separate gate must really
+      # render through the installed launcher's required sandbox boundary.
+      - name: Build and verify the installed Ubuntu package
+        run: |
+          python3 packaging/build-deb.py
+          sudo apt-get install --yes --no-install-recommends ./dist/kukni_*.deb
+          /usr/bin/kukni --check

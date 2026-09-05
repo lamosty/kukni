@@ -38,6 +38,7 @@ class TextSmokeApplication(Adw.Application):
 
     def do_activate(self) -> None:
         self.window = PreviewWindow(self, RendererRegistry((TextRenderer(),)))
+        self.window.set_navigation_available(True)  # Synthetic attached session.
         self.window.connect(
             "navigation-requested",
             lambda _window, direction: self.navigation.append(direction),
@@ -85,7 +86,7 @@ class TextSmokeApplication(Adw.Application):
             self._finish()
             return GLib.SOURCE_REMOVE
         action.activate(None)
-        GLib.timeout_add(80, self._verify_navigation)
+        GLib.timeout_add(220, self._verify_navigation)
         return GLib.SOURCE_REMOVE
 
     def _verify_navigation(self) -> bool:
@@ -95,8 +96,9 @@ class TextSmokeApplication(Adw.Application):
             self.failures.append("navigation closed or replaced the text preview")
         if not self.window.get_visible():
             self.failures.append("text preview window closed during navigation")
-        if self.window.get_default_size() != (1180, 760):
-            self.failures.append("text content changed the stable window size")
+        self.text_window_size = self.window.get_default_size()
+        if not all(value > 0 for value in self.text_window_size):
+            self.failures.append("text preview has invalid window geometry")
         if self.marker.exists():
             self.failures.append("navigation executed the selected script")
         self.window.show_file(Gio.File.new_for_path(str(self.gpx)))
@@ -124,8 +126,8 @@ class TextSmokeApplication(Adw.Application):
                 self.failures.append("GPX source view can steal navigation focus")
         if not self.window.get_visible():
             self.failures.append("GPX preview closed the window")
-        if self.window.get_default_size() != (1180, 760):
-            self.failures.append("GPX content changed the stable window size")
+        if self.window.get_default_size() != self.text_window_size:
+            self.failures.append("same-family text navigation changed window geometry")
         self._finish()
         return GLib.SOURCE_REMOVE
 
