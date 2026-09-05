@@ -1,9 +1,10 @@
 # Packaging
 
-Kukni does not have a published package repository yet. Today, the supported
-installation path is the repository's conflict-checked per-user `install.sh`.
-The repository can also build an inspectable local alpha `.deb`; this does not
-claim that a package repository or signed release artifact is already available.
+Kukni does not have a published package repository yet. For a complete Ubuntu
+runtime, the repository can build an inspectable local alpha `.deb` with its
+required dependency and namespace setup. The per-user `install.sh` remains a
+development option with limited PDF/HTML capability. Neither path implies a
+public package repository or signed release artifact is already available.
 
 ## Current per-user layout
 

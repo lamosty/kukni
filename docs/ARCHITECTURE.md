@@ -46,10 +46,10 @@ can resolve to a rich preview, a fallback, or an error, but it does not decide
 when the session closes. Space, Escape, or the window close control ends the
 session.
 
-The outer window uses a stable viewport instead of resizing to each file. On
-Wayland, Kukni accepts Nautilus's foreign parent handle so the compositor can
-place the preview relative to the Files window without unsupported absolute
-positioning.
+The outer window remains the same surface while a bounded, coalesced sizing
+policy adapts to the content's shape and the monitor's logical dimensions.
+Manual resizing takes precedence. On Wayland, Kukni accepts Nautilus's foreign
+parent handle; exact absolute positioning remains the compositor's decision.
 
 Kukni accepts native local files only. Remote URIs receive an in-window
 explanation and are not fetched.
@@ -74,10 +74,12 @@ Current automatic routes are:
 2. **XLSX** — a bounded ZIP/XML parser produces an inert model for a native GTK
    table. It reads only the first visible worksheet, shows cached formula values,
    and ignores macros, active content, and external relationships.
-3. **PDF** — Poppler renders page one in a short-lived bubblewrap namespace
-   behind `prlimit`. Input and output sizes, CPU, address space, descriptors,
-   dimensions, and wall time are bounded. If the sandbox probe fails, PDF uses
-   the fallback.
+3. **PDF** — sandboxed Poppler tools determine the page count and lazily render
+   one requested page behind `prlimit`, limited to navigation through 500 pages.
+   Requests and pending results are coalesced; outdated work is cancelled.
+   Input/output sizes, CPU, address space, descriptors, dimensions, and request
+   wall time are bounded. Capability checks run off GTK. An unavailable sandbox
+   produces a clear fallback, never an unconfined converter.
 4. **HTML** — WebKitGTK 6 may render a bounded local document only when its
    process sandbox is usable. JavaScript, networking, forms, media, broad local
    access, and other active features remain disabled. If that boundary is not
@@ -93,6 +95,11 @@ up to 32,768 pixels per edge and 100 megapixels, and a retained RGBA frame up to
 eight-second wall deadline, 768 MiB address-space ceiling, six CPU seconds,
 64-descriptor ceiling, 64 MiB file-size ceiling, hard `NPROC=0`, and verified
 `PR_SET_NO_NEW_PRIVS` before untrusted CR2 bytes are read.
+
+A shared memory-only image cache retains at most four validated pixel payloads,
+64 MiB total, with lazy 60-second expiry. File identity, size, modification time,
+and change time are checked off GTK; changed files and failed preparations are
+not reused. Admission remains held through GTK delivery even on a cache hit.
 
 This is a killable, tightly checked process boundary, not a complete sandbox.
 The source install cannot create the mount and network namespaces needed here
@@ -120,8 +127,11 @@ navigation continuous even before a dedicated renderer exists for a format.
 Ubuntu's AppArmor policy can deny unprivileged user namespaces to an unconfined
 source installation. That means bubblewrap-backed PDF and HTML rendering may
 correctly remain unavailable even when their packages are installed. A future
-`.deb` can ship a narrowly scoped AppArmor profile; the source installer does
-not alter system security policy.
+`.deb` includes an app-scoped namespace-eligibility profile attached to its
+root-owned launcher; the source installer does not alter system policy. That
+compatibility profile is not itself a decoder sandbox: Bubblewrap/WebKit must
+still establish their required isolation, and installed-package tests must
+prove real renderer success. No global namespace restriction is disabled.
 
 ## Experimental media work that is not routed
 

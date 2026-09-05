@@ -42,7 +42,8 @@ The standalone application currently applies these boundaries:
 - HTML requires WebKitGTK's process sandbox and disables JavaScript, networking,
   media, forms, broad local-file access, and other active features;
 - PDF rendering occurs in a short-lived bubblewrap namespace behind process
-  resource limits and a wall deadline;
+  resource limits and a wall deadline; pdfinfo shares that boundary, metadata
+  output is capped at 64 KiB, and navigation is limited to 500 pages;
 - optional sandbox-gated routes fall back when the required boundary cannot be
   established;
 - asynchronous results are generation-checked so canceled work cannot replace a
@@ -61,7 +62,8 @@ deadline, 768 MiB address-space limit, six CPU seconds, 64 open descriptors,
 `NPROC=0`, and verified `PR_SET_NO_NEW_PRIVS` before it reads untrusted CR2
 bytes.
 
-That worker is process-contained but not fully sandboxed in the source install.
+That worker is process-contained but not fully sandboxed in either the source
+install or current Ubuntu package.
 It has no filesystem or network namespace, so compromised native decoder code
 would retain ordinary same-user filesystem, network, IPC, and signalling access
 during the worker's short lifetime. Passing fixed inherited descriptors is the
@@ -72,7 +74,10 @@ Ordinary PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO files use the same worker
 contract and share CR2's one admission slot, with a 64 MiB input ceiling. The
 helper chooses an allowlisted raster decoder from file magic; arbitrary
 installed loaders and SVG are not reachable through this route. The source
-worker has the same filesystem/network isolation limitation described above.
+and packaged image worker have the same filesystem/network isolation limitation
+described above. Their validated pixels may be retained in a memory-only cache
+bounded to four entries and 64 MiB, with lazy 60-second expiry and file-identity
+checks; previews are not written to a persistent cache.
 
 ## Disabled paths and current gaps
 
@@ -92,3 +97,10 @@ with `sudo`. It uses a manifest to avoid overwriting or removing unexpected
 files. A source installation cannot add the narrowly scoped system AppArmor
 profile that some sandboxed renderers may require on Ubuntu; those renderers
 must remain unavailable rather than bypass policy.
+
+The Ubuntu package adds app-scoped namespace eligibility to its root-owned
+launcher so the mandatory Bubblewrap/WebKit boundaries can be established.
+That compatibility profile is not itself filesystem/network confinement and
+does not turn raster/CR2 workers into namespace sandboxes. No global namespace
+restriction is disabled. Installed-package CI and `kukni --check` require real
+core image/PDF output instead of interpreting fallback as renderer success.

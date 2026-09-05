@@ -13,13 +13,19 @@ All notable changes to this project will be documented here.
 
 - Keep the latest photograph pending while a cancelled decoder finishes;
   rapid navigation no longer turns a temporarily busy worker into a failure.
+- Add content-aware, monitor-bounded window sizing, shared image/PDF zoom and
+  pan, and file details on demand; preserve manual resizing and the same window.
+- Bind navigation to the originating file-manager session and detach it on
+  standalone launch, file choice, caller disappearance, or session closure.
+- Cache recent validated image pixels in memory with byte/entry/age limits and
+  file-change invalidation; no persistent image cache is written.
 
 - Establish Kukni as an independent GTK4/libadwaita file previewer with its own
   application identity and persistent window.
 - Implement the Nautilus previewer D-Bus contract for Space-key activation,
   close behavior, parent-window association, and directional selection events.
 - Preserve one session across navigation with cancellation, stale-result
-  protection, stable sizing, a global preparation timeout, and in-window error
+  protection, a global preparation timeout, and in-window error
   states.
 - Add a deterministic capability registry and a calm metadata-only fallback.
   Remove binary/hex inspection, duplicate filenames, and repeated failure toasts
@@ -29,14 +35,19 @@ All notable changes to this project will be documented here.
 - Add a bounded XLSX parser and native spreadsheet view without formula
   evaluation, macros, external links, network access, or an office-suite
   dependency.
-- Add sandbox-gated HTML previews with active features disabled and first-page
-  PDF rendering in a resource-limited disposable worker.
+- Add sandbox-gated HTML previews and bounded lazy PDF page navigation, with
+  shared fit/zoom controls and cancellation of obsolete page requests.
 - Add an isolated media-worker protocol and strict parent supervisor for one
   bounded video frame or inert audio metadata. Keep automatic media routing
   disabled pending aggregate process-tree containment and packaged sandbox
   tests.
 
 ### Installation and compatibility
+
+- Add a rootless Ubuntu `.deb` builder with runtime dependencies and app-scoped
+  namespace permission for its root-owned launcher. Add headless `--check`
+  diagnostics that require actual core image/PDF rendering and an installed
+  package CI gate; document source-install migration and capability limits.
 
 - Add a conflict-checked standalone per-user installer with desktop and D-Bus
   activation metadata, an ownership manifest, transactional replacement, and a

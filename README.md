@@ -17,9 +17,9 @@ Kukni is its own GTK4 application. It does **not** require GNOME Sushi.
 _Kukni_ is colloquial Slovak for “take a look.”
 
 > [!IMPORTANT]
-> Kukni is an early alpha with no packaged release yet. The current validation
-> target is Ubuntu 24.04 with Nautilus 46. Install from a reviewed source
-> checkout, expect rough edges, and read the format limits below.
+> Kukni is an early alpha with no published binary release yet. The current
+> validation target is Ubuntu 24.04 with Nautilus 46. The repository includes a
+> local Ubuntu package builder; read the installation and format limits below.
 
 ## What already works
 
@@ -35,8 +35,10 @@ _Kukni_ is colloquial Slovak for “take a look.”
 - Inspect the first visible worksheet of an XLSX file without starting an
   office suite, evaluating formulas, running macros, or following external
   links.
-- Render locked-down HTML and the first page of a PDF when their optional
-  engines and required sandbox are available.
+- Browse PDF pages with fit, zoom, and page controls when the required sandbox
+  is installed. Optional HTML previews keep active content disabled.
+- Use content-shaped windows, zoom and pan, and an on-demand Info panel.
+  Changing a file keeps the same window alive; manual resizing takes precedence.
 - Keep browsing unsupported files with a simple file card and a clear
   explanation, never a hex dump or binary-content inspection panel.
 - Open a file directly with `kukni FILE`, or choose one inside the app with
@@ -51,7 +53,7 @@ Kukni accepts local regular files only. It does not fetch remote locations.
 | Text and source | Read-only, bounded to the first 1 MiB; hidden controls are made visible |
 | XLSX | Bounded native table for the first visible worksheet; cached values only |
 | HTML | Available only with WebKitGTK 6 and a working process sandbox; scripts, network access, and broad local-file access stay disabled |
-| PDF | First page only, using Poppler inside a working bubblewrap sandbox |
+| PDF | Lazy page navigation through the first 500 pages, fit/zoom; requires a working bubblewrap sandbox |
 | Canon CR2 | Camera-generated embedded JPEG, automatically oriented and fit to the window |
 | PNG, JPEG, WebP, GIF, TIFF, BMP, ICO | Bounded image preview; static frame only; WebP requires its GdkPixbuf loader |
 | SVG, HEIC, other images and camera RAW | File details; dedicated renderers are not connected yet |
@@ -86,13 +88,42 @@ filesystem and network access. The descriptor-only protocol is an intended
 access boundary, not a complete sandbox.
 
 Ordinary raster images reuse this same process boundary, with a 64 MiB input
-limit and the same pixel, CPU, memory, and deadline limits. They do not gain a
-filesystem/network sandbox merely by using a different image format.
+limit and the same pixel, CPU, memory, and deadline limits. Raster/CR2 workers
+remain process-bounded rather than filesystem/network isolated in the current
+Ubuntu package too; its namespace policy enables the separate PDF/HTML paths.
 
-## Install for your user
+## Ubuntu package
 
-Kukni currently installs from source. On Ubuntu 24.04, install the core runtime
-dependencies:
+The package declares its runtime dependencies and includes a Kukni-specific
+AppArmor namespace permission so its mandatory PDF sandbox can start on Ubuntu
+24.04. It does not disable system security or make PDF rendering unconfined.
+
+There is no published binary release yet. To build from a clean reviewed checkout:
+
+```sh
+git clone https://github.com/lamosty/kukni.git
+cd kukni
+python3 packaging/build-deb.py
+sudo apt install ./dist/kukni_*.deb
+/usr/bin/kukni --check
+```
+
+`--check` must succeed for core images and PDF; it actually renders synthetic
+content rather than accepting an unavailable-preview fallback. Optional HTML
+prerequisites are reported separately.
+
+**Already using the per-user installer?** Close the old preview and run
+`~/.local/lib/kukni/uninstall.sh` **without sudo** before installing the package.
+Otherwise its per-user launcher or activation file can shadow the new package.
+The package conflicts with `gnome-sushi` because both provide Nautilus's preview
+service; APT shows that replacement before installation. See
+[Packaging](docs/PACKAGING.md) for migration and removal details.
+
+## Per-user source installation (development)
+
+The source installer remains useful for development, but cannot install the
+system sandbox policy. PDF and HTML may remain unavailable even with their
+runtime packages installed. On Ubuntu 24.04, install the source dependencies:
 
 ```sh
 sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 util-linux webp-pixbuf-loader
@@ -144,10 +175,17 @@ it does not.
 | Arrow keys | Ask Nautilus for the adjacent selection |
 | <kbd>F</kbd> or <kbd>F11</kbd> | Toggle fullscreen |
 | <kbd>Ctrl</kbd>+<kbd>O</kbd> | Choose a file directly |
+| <kbd>+</kbd> / <kbd>−</kbd> | Zoom the image or PDF preview |
+| <kbd>0</kbd> / <kbd>1</kbd> | Fit / 1:1 retained preview pixels |
+| <kbd>Ctrl</kbd>+wheel / drag | Zoom / pan an enlarged preview |
+| <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | Previous / next PDF page |
+| <kbd>Ctrl</kbd>+<kbd>I</kbd> | Show or hide file information |
 
 Arrow-key folder navigation is available when Nautilus opened the preview.
+1:1 refers to the retained preview, not full-source detail for downscaled images
+or vector PDF pages; the control tooltip explains this limit.
 
-## Uninstall
+## Uninstall the per-user source copy
 
 Do not use `sudo`:
 
@@ -174,11 +212,11 @@ Kukni does not ship or install a Sushi plugin.
 
 ## Packages and releases
 
-There is no Kukni APT repository, `.deb`, or Snap release today. The planned
-Ubuntu path is a reviewable `.deb` followed by a signed Launchpad PPA, so a
-future install can use normal `apt` updates. Snap is not the first packaging
-target because its confinement must be reconciled with Nautilus's session
-D-Bus contract and access to arbitrary selected files.
+There is no public Kukni APT repository or Snap release today. The local `.deb`
+builder is the first packaging step; a signed Launchpad PPA and normal APT
+updates come after installed-package validation. Snap is not the first target
+because its confinement must support Nautilus's session D-Bus contract and
+access to arbitrary selected files.
 
 See [Packaging](docs/PACKAGING.md) for the release plan.
 
