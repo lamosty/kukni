@@ -810,6 +810,9 @@ class Cr2Renderer:
 
     id = "cr2"
 
+    def __init__(self) -> None:
+        self._pending_id = 0
+
     def supports(self, file: Gio.File, info: Gio.FileInfo) -> bool:
         return (
             file.is_native()
@@ -826,6 +829,9 @@ class Cr2Renderer:
         on_ready: ReadyCallback,
         on_error: ErrorCallback,
     ) -> None:
+        if self._pending_id:
+            GLib.source_remove(self._pending_id)
+            self._pending_id = 0
         path = file.get_path() if file.is_native() else None
         if path is None:
             self._queue_error(
@@ -837,10 +843,18 @@ class Cr2Renderer:
         if cancellable.is_cancelled():
             return
         if not _WORKER_SLOT.acquire(blocking=False):
-            self._queue_error(
+            # @decision One pending selection replaces the previous one. Keep
+            # admission bounded through GTK delivery, but don't reject the new
+            # photograph while a cancelled worker is still releasing its slot.
+            # The session's preparation deadline also bounds time spent here.
+            self._pending_id = GLib.timeout_add(
+                25,
+                self._retry_pending,
+                file,
+                _info,
                 cancellable,
+                on_ready,
                 on_error,
-                "CR2 preview is busy; showing file details instead",
             )
             return
 
@@ -889,6 +903,12 @@ class Cr2Renderer:
                 on_error,
                 "The CR2 preview worker thread could not be started",
             )
+
+    def _retry_pending(self, file, info, cancellable, on_ready, on_error) -> bool:
+        self._pending_id = 0
+        if not cancellable.is_cancelled():
+            self.render(file, info, cancellable, on_ready, on_error)
+        return GLib.SOURCE_REMOVE
 
     @staticmethod
     def _queue_error(

@@ -6,6 +6,9 @@ All notable changes to this project will be documented here.
 
 ### Standalone application
 
+- Keep the latest photograph pending while a cancelled decoder finishes;
+  rapid navigation no longer turns a temporarily busy worker into a failure.
+
 - Establish Kukni as an independent GTK4/libadwaita file previewer with its own
   application identity and persistent window.
 - Implement the Nautilus previewer D-Bus contract for Space-key activation,

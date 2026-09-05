@@ -471,7 +471,7 @@ class Cr2RendererLifecycleTests(unittest.TestCase):
         result = Cr2WorkerResult(2, 1, 20, 10, 8, 8)
         return Cr2WorkerOutput(result, b"12345678")
 
-    def test_busy_slot_falls_back_without_starting_a_thread(self):
+    def test_busy_slot_waits_without_starting_a_thread_or_failing(self):
         slot = TrackingSlot(available=False)
         failed = mock.Mock()
 
@@ -479,9 +479,8 @@ class Cr2RendererLifecycleTests(unittest.TestCase):
             mock.patch.object(cr2, "_WORKER_SLOT", slot),
             mock.patch("kukni.renderers.cr2.threading.Thread") as thread,
             mock.patch(
-                "kukni.renderers.cr2.GLib.idle_add",
-                side_effect=lambda callback, *args: callback(*args),
-            ),
+                "kukni.renderers.cr2.GLib.timeout_add", return_value=17,
+            ) as retry,
         ):
             Cr2Renderer().render(
                 Gio.File.new_for_path("/tmp/photo.cr2"),
@@ -492,9 +491,52 @@ class Cr2RendererLifecycleTests(unittest.TestCase):
             )
 
         thread.assert_not_called()
-        failed.assert_called_once_with(
-            "CR2 preview is busy; showing file details instead"
-        )
+        failed.assert_not_called()
+        retry.assert_called_once()
+
+    def test_pending_selection_is_replaced_and_latest_runs_when_slot_is_free(self):
+        slot = TrackingSlot(available=False)
+        renderer = Cr2Renderer()
+        cancelled = Gio.Cancellable()
+        failed = mock.Mock()
+        with (
+            mock.patch.object(cr2, "_WORKER_SLOT", slot),
+            mock.patch(
+                "kukni.renderers.cr2.GLib.timeout_add", side_effect=[17, 18]
+            ) as timer,
+            mock.patch("kukni.renderers.cr2.GLib.source_remove") as remove,
+            mock.patch("kukni.renderers.cr2.threading.Thread", InlineThread),
+            mock.patch(
+                "kukni.renderers.cr2.run_cr2_worker", return_value=self.output()
+            ) as worker,
+            mock.patch("kukni.renderers.cr2.GLib.idle_add", return_value=19),
+        ):
+            renderer.render(
+                Gio.File.new_for_path("/tmp/old.cr2"), Gio.FileInfo(),
+                cancelled, mock.Mock(), failed,
+            )
+            cancelled.cancel()
+            renderer.render(
+                Gio.File.new_for_path("/tmp/latest.cr2"), Gio.FileInfo(),
+                Gio.Cancellable(), mock.Mock(), failed,
+            )
+            remove.assert_called_once_with(17)
+            slot.available = True
+            _, retry, *arguments = timer.call_args.args
+            retry(*arguments)
+            self.assertEqual(worker.call_args.args[0], "/tmp/latest.cr2")
+            self.assertEqual(renderer._pending_id, 0)
+            failed.assert_not_called()
+
+    def test_cancelled_pending_request_never_starts(self):
+        renderer = Cr2Renderer()
+        cancellable = Gio.Cancellable()
+        cancellable.cancel()
+        with mock.patch.object(renderer, "render") as render:
+            renderer._retry_pending(
+                mock.Mock(), mock.Mock(), cancellable, mock.Mock(), mock.Mock()
+            )
+        render.assert_not_called()
 
     def test_thread_start_failure_releases_the_slot(self):
         slot = TrackingSlot()
