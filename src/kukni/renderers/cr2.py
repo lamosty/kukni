@@ -41,6 +41,7 @@ gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
+from ..image_cache import ImageCache
 from ..worker import terminate_process_group
 from .base import ErrorCallback, ReadyCallback
 from .image_view import ImagePreviewView
@@ -119,6 +120,7 @@ DEFAULT_LIMITS = Cr2Limits()
 # consumed or discarded the raw payload. This bounds queued worker output even
 # when navigation outruns the main context.
 _WORKER_SLOT = threading.BoundedSemaphore(1)
+_IMAGE_CACHE = ImageCache()
 
 
 class Cr2PreviewError(RuntimeError):
@@ -823,7 +825,17 @@ class Cr2Renderer:
             delivery_owns_slot = False
             error_message: str | None = None
             try:
-                output = self._prepare(path, cancelled=cancellable.is_cancelled)
+                # Metadata checks and cache access stay off GTK. Hits retain
+                # the same admission slot through delivery as fresh decodes;
+                # fast navigation must not queue unbounded pixel payloads.
+                _check_cancelled(cancellable.is_cancelled)
+                cache_key = _IMAGE_CACHE.key_for(self.id, path)
+                output = _IMAGE_CACHE.get(cache_key)
+                _check_cancelled(cancellable.is_cancelled)
+                if output is None:
+                    output = self._prepare(path, cancelled=cancellable.is_cancelled)
+                    _check_cancelled(cancellable.is_cancelled)
+                    _IMAGE_CACHE.put(cache_key, output)
                 try:
                     source_id = GLib.idle_add(
                         self._deliver_preview,
