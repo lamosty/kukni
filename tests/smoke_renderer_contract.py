@@ -7,6 +7,7 @@
 from pathlib import Path
 import sys
 import tempfile
+import time
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,7 @@ class ContractSmokeApplication(Adw.Application):
         self.failures: list[str] = []
         self.renderer = ContractRenderer()
         self.window = None
+        self.hang_deadline: float | None = None
 
     def do_activate(self) -> None:
         self.window = PreviewWindow(
@@ -115,13 +117,21 @@ class ContractSmokeApplication(Adw.Application):
         if snapshot.detail != "Synthetic preview":
             self.failures.append("stale callback replaced the current preview")
         self._show("bounded.hang")
-        GLib.timeout_add(1600, self._check_hang_timeout)
+        # GLib second-based timers intentionally use coarse scheduling. Poll to
+        # observe the bounded transition instead of racing it with another
+        # arbitrary one-shot timeout.
+        self.hang_deadline = time.monotonic() + 4.0
+        GLib.timeout_add(100, self._check_hang_timeout)
         return GLib.SOURCE_REMOVE
 
     def _check_hang_timeout(self) -> bool:
-        self._expect_state(PreviewState.ERROR, "hung renderer timeout")
         snapshot = self.window.session.snapshot
-        if "exceeded 1 second" not in snapshot.detail:
+        if snapshot.state is PreviewState.OPENING and (
+            self.hang_deadline is not None and time.monotonic() < self.hang_deadline
+        ):
+            return GLib.SOURCE_CONTINUE
+        self._expect_state(PreviewState.ERROR, "hung renderer timeout")
+        if "exceeded 1 second" not in (snapshot.detail or ""):
             self.failures.append("hung renderer did not report the bounded timeout")
         if self.window.lookup_action("navigate-down") is None:
             self.failures.append("navigation disappeared after renderer timeout")
