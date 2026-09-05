@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+set -eu
+case "${1:-}" in
+    remove)
+        if aa-enabled --quiet && [ -f /etc/apparmor.d/io.github.lamosty.Kukni ]; then
+            # A previously unloaded profile is not a reason to block removal.
+            apparmor_parser --remove /etc/apparmor.d/io.github.lamosty.Kukni || \
+                printf 'Kukni: its AppArmor profile could not be unloaded.\n' >&2
+        fi
+        ;;
+esac

@@ -9,7 +9,13 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from kukni.application import main
+if sys.argv[1:] == ["--check"]:
+    from kukni.diagnostics import main
+elif sys.argv[1:] == ["--version"]:
+    print("Kukni " + (PROJECT_ROOT / "VERSION").read_text().strip())
+    raise SystemExit(0)
+else:
+    from kukni.application import main
 
 
 raise SystemExit(main())

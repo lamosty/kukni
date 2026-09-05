@@ -4,8 +4,16 @@
 
 set -eu
 
+# @security Do not let a caller choose the utilities used to resolve the
+# launcher or the Python executable's subprocess search path. Python isolated
+# mode also ignores PYTHONPATH and the per-user site directory. This launcher
+# only grants AppArmor user-namespace eligibility; the renderer sandboxes are
+# still mandatory.
+PATH=/usr/bin:/bin
+export PATH
+
 launcher_path=$(readlink -f -- "$0")
 launcher_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")" && pwd)
 PYTHONDONTWRITEBYTECODE=1
 export PYTHONDONTWRITEBYTECODE
-exec /usr/bin/python3 -B "$launcher_dir/../bin/kukni" "$@"
+exec /usr/bin/python3 -I -B "$launcher_dir/../bin/kukni" "$@"

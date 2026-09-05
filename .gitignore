@@ -3,6 +3,7 @@ __pycache__/
 .coverage
 .venv/
 htmlcov/
+dist/
 
 # Never commit camera originals or generated preview images by accident.
 *.cr2

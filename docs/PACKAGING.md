@@ -2,8 +2,8 @@
 
 Kukni does not have a published package repository yet. Today, the supported
 installation path is the repository's conflict-checked per-user `install.sh`.
-This document describes the path from that alpha installer to normal Linux
-packages; it does not claim that those packages are already available.
+The repository can also build an inspectable local alpha `.deb`; this does not
+claim that a package repository or signed release artifact is already available.
 
 ## Current per-user layout
 
@@ -31,6 +31,64 @@ the user explicitly chooses `--force` after review.
 This layout makes a source checkout usable, but it is not a substitute for a
 versioned distro package: it does not resolve dependencies, provide automatic
 updates, or install a system AppArmor profile.
+
+## Local Ubuntu alpha package
+
+`packaging/build-deb.py` builds from a clean commit, derives a monotonic alpha
+version from the Git commit count, and writes the artifact below ignored
+`dist/`. Building and inspecting it require no privilege and make no system
+changes:
+
+```sh
+./packaging/build-deb.py
+dpkg-deb --info dist/kukni_*.deb
+dpkg-deb --contents dist/kukni_*.deb
+/usr/sbin/apparmor_parser --skip-kernel-load --skip-cache \
+  packaging/debian/io.github.lamosty.Kukni.apparmor
+```
+
+The package declares `Conflicts` and `Replaces` for `gnome-sushi`, because both
+provide the well-known Nautilus previewer D-Bus service. Installing Kukni can
+therefore remove Sushi; restoring Sushi later requires reinstalling the
+`gnome-sushi` package rather than merely removing Kukni.
+
+### Migrate from the per-user preview
+
+Per-user D-Bus activation and desktop files take precedence over system files,
+and `~/.local/bin/kukni` can take precedence in the shell. Before installing the
+`.deb`:
+
+1. Close any running Kukni preview.
+2. As the normal desktop user, run the existing user-owned
+   `~/.local/lib/kukni/uninstall.sh`. Never use `sudo` to delete these files from
+   a home directory. A custom-prefix install must use the uninstaller stored in
+   that prefix instead.
+3. Install the local `.deb` normally with APT, for example
+   `sudo apt install ./dist/kukni_*.deb`.
+4. Run `/usr/bin/kukni --check` explicitly. The image and PDF entries are real
+   synthetic-file render self-tests; the optional HTML entry checks
+   prerequisites only and does not claim a page was rendered.
+
+The check warns, without reading or printing private file contents, if default
+per-user Kukni files still shadow a system install. If the old preview process
+still owns the session-bus name, sign out and back in before testing Space-key
+activation again.
+
+### AppArmor conffile lifecycle
+
+The package owns `/etc/apparmor.d/io.github.lamosty.Kukni` as a conffile. Its
+unconfined attachment to the root-owned `/usr/lib/kukni/launcher/kukni` grants
+only the `userns` eligibility needed to start Bubblewrap and WebKit sandboxes.
+It is **not** a renderer sandbox: those process sandboxes remain mandatory.
+This launcher/profile arrangement is also not protection against a malicious
+process or environment already controlled by the same user.
+
+If an administrator deletes the conffile, package configuration preserves that
+decision and prints a warning instead of silently recreating or overriding it.
+Use the package manager's explicit conffile-recovery mechanism when restoration
+is intended. Plain removal retains conffiles; `sudo apt purge kukni` performs
+complete package configuration/profile removal. A subsequent install creates a
+fresh packaged profile.
 
 ## Ubuntu release path
 

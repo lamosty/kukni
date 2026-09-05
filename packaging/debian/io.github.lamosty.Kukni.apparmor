@@ -1,0 +1,13 @@
+# Ubuntu 24.04 namespace-eligibility policy for the root-owned Kukni launcher.
+# @decision This is NOT the decoder sandbox. It adds the app-scoped userns
+# permission required to construct Bubblewrap/WebKit sandboxes, following
+# Ubuntu's compatibility-profile convention. It neither changes a global
+# sysctl nor attaches permission to Python or Bubblewrap for other apps.
+# The fixed launcher and application files must be root-owned distro files.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile io.github.lamosty.Kukni /usr/lib/kukni/launcher/kukni flags=(unconfined) {
+  userns,
+  include if exists <local/io.github.lamosty.Kukni>
+}

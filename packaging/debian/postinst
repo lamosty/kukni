@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+set -eu
+case "${1:-}" in
+    configure)
+        # Package configuration must report a policy-load failure rather than
+        # claiming working previews. An administrator may intentionally delete
+        # this conffile; dpkg preserves that decision, so do not recreate it.
+        profile=/etc/apparmor.d/io.github.lamosty.Kukni
+        if [ ! -f "$profile" ]; then
+            printf '%s\n' \
+                'Kukni: AppArmor profile is absent; sandboxed previews may remain unavailable.' \
+                'Restore the package conffile explicitly or purge and reinstall Kukni.' >&2
+        elif aa-enabled --quiet; then
+            # Only this app's namespace-eligibility profile is replaced.
+            apparmor_parser --replace "$profile"
+        fi
+        ;;
+esac
