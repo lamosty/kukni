@@ -23,7 +23,7 @@ Nautilus Space key                         `kukni FILE`
                   ├─ gated PDF worker
                   ├─ gated HTML renderer
                   ├─ bounded text/source view
-                  └─ universal metadata/text/hex fallback
+                  └─ metadata-only unavailable state
 ```
 
 Kukni owns the user-session previewer D-Bus name and implements both the legacy
@@ -58,8 +58,8 @@ explanation and are not fetched.
 The registry probes renderers in deterministic order. A renderer receives one
 `Gio.File`, its already-queried metadata, a cancellation object, and success and
 error callbacks. If no rich renderer accepts the file—or a renderer cannot run
-within its required boundary—the universal fallback shows metadata and a
-bounded text or hex sample.
+within its required boundary—the fallback shows a plain explanation, file type,
+and size without reading the file. Technical details are disclosed on demand.
 
 Current automatic routes are:
 

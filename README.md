@@ -35,8 +35,8 @@ _Kukni_ is colloquial Slovak for “take a look.”
   links.
 - Render locked-down HTML and the first page of a PDF when their optional
   engines and required sandbox are available.
-- Get a useful metadata plus text-or-hex inspection view for every other local
-  regular file instead of losing the preview session.
+- Keep browsing unsupported files with a simple file card and a clear
+  explanation, never a hex dump or binary-content inspection panel.
 - Open a file directly with `kukni FILE`, or choose one inside the app with
   <kbd>Ctrl</kbd>+<kbd>O</kbd>.
 
@@ -51,9 +51,9 @@ Kukni accepts local regular files only. It does not fetch remote locations.
 | HTML | Available only with WebKitGTK 6 and a working process sandbox; scripts, network access, and broad local-file access stay disabled |
 | PDF | First page only, using Poppler inside a working bubblewrap sandbox |
 | Canon CR2 | Camera-generated embedded JPEG, automatically oriented and fit to the window |
-| Other images and camera RAW | Metadata plus bounded inspection fallback; dedicated renderers are not connected yet |
-| Audio and video | Metadata plus bounded inspection fallback; automatic media decoding is deliberately disabled |
-| Other local files | Metadata plus a bounded text or hex sample |
+| Other images and camera RAW | File details; dedicated renderers are not connected yet |
+| Audio and video | File details; automatic media decoding is deliberately disabled |
+| Other local files | A plain “Preview unavailable” state with type and size; no byte inspection |
 
 If an optional renderer or its sandbox is unavailable, Kukni falls back rather
 than silently weakening the safety boundary.

@@ -5,33 +5,40 @@ import sys
 from pathlib import Path
 import unittest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from kukni.renderers.fallback import format_hex_sample, is_probably_text
+from gi.repository import Gio
+from kukni.renderers.fallback import unavailable_message
 
 
-class FallbackFormattingTests(unittest.TestCase):
-    def test_detects_declared_and_valid_utf8_text(self):
-        self.assertTrue(is_probably_text(b"hello", "text/plain"))
-        self.assertTrue(is_probably_text("ahoj svet".encode(), None))
+class FallbackMessageTests(unittest.TestCase):
+    def info(self, kind=Gio.FileType.REGULAR, size=100):
+        info = Gio.FileInfo()
+        info.set_file_type(kind)
+        info.set_size(size)
+        return info
 
-    def test_rejects_binary_and_invalid_utf8(self):
-        self.assertFalse(is_probably_text(b"abc\x00def", None))
-        self.assertFalse(is_probably_text(b"abc\x00def", "text/plain"))
-        self.assertFalse(is_probably_text(b"\xff", None))
+    def test_unknown_regular_file_gets_a_plain_explanation(self):
+        self.assertEqual(
+            unavailable_message(self.info()),
+            "A preview isn't available for this file type yet.",
+        )
 
-    def test_accepts_bom_marked_unicode(self):
-        self.assertTrue(is_probably_text("ahoj".encode("utf-16"), "text/plain"))
+    def test_empty_file_is_not_described_as_unsupported(self):
+        self.assertEqual(unavailable_message(self.info(size=0)), "This file is empty.")
 
-    def test_formats_bounded_hex_dump(self):
-        rendered = format_hex_sample(b"Hello\x00world" + bytes(range(32)), limit=16)
+    def test_folder_is_not_described_as_empty_or_binary(self):
+        self.assertEqual(
+            unavailable_message(self.info(Gio.FileType.DIRECTORY, 0)),
+            "Folder previews aren't available yet.",
+        )
 
-        self.assertIn("00000000", rendered)
-        self.assertIn("48 65 6c 6c 6f", rendered)
-        self.assertIn("|Hello.world", rendered)
-        self.assertNotIn("00000010", rendered)
+    def test_special_file_has_no_content_inspection(self):
+        self.assertEqual(
+            unavailable_message(self.info(Gio.FileType.SPECIAL)),
+            "This item doesn't have a preview.",
+        )
 
 
 if __name__ == "__main__":

@@ -16,13 +16,24 @@ from gi.repository import GLib
 
 from kukni.application import KukniApplication
 from kukni.session import PreviewState
+from gi.repository import Gtk
+
+
+def descendants(widget):
+    yield widget
+    child = widget.get_first_child()
+    while child is not None:
+        yield from descendants(child)
+        child = child.get_next_sibling()
 
 
 def main() -> int:
     failures: list[str] = []
     with tempfile.TemporaryDirectory() as directory:
         sample = Path(directory) / "unknown.kukni-smoke"
-        sample.write_bytes(b"Kukni fallback smoke test\n")
+        # An unknown suffix with ordinary prose is correctly detected as text
+        # by Gio. Use genuine opaque binary data to exercise the unavailable UI.
+        sample.write_bytes(b"\x00\x01\x02Kukni fallback smoke test\x00")
 
         application = KukniApplication()
 
@@ -38,6 +49,18 @@ def main() -> int:
                     raise AssertionError(f"unexpected state: {snapshot.state.value}")
                 if not window.get_visible():
                     raise AssertionError("preview window is not visible")
+                content = window._stack.get_child_by_name("content")
+                widgets = tuple(descendants(content))
+                if any(isinstance(widget, Gtk.TextView) for widget in widgets):
+                    raise AssertionError("fallback must not expose a byte inspector")
+                labels = [
+                    widget.get_label() for widget in widgets
+                    if isinstance(widget, Gtk.Label)
+                ]
+                if "Preview unavailable" not in labels:
+                    raise AssertionError("fallback has no plain-language heading")
+                if any("Kukni fallback smoke test" in label for label in labels):
+                    raise AssertionError("fallback exposed selected file contents")
             except Exception as error:  # pragma: no cover - smoke diagnostics
                 failures.append(str(error))
             finally:

@@ -13,7 +13,7 @@ The `main` branch already provides:
 - one persistent preview window with cancellation and stale-result protection;
 - standalone Canon CR2 previews using the embedded display JPEG in a bounded,
   killable decoder worker that returns validated raw RGBA;
-- bounded text/source previews and a universal metadata/text/hex fallback;
+- bounded text/source previews and a metadata-only unavailable state;
 - a bounded native XLSX view that does not execute formulas or active content;
 - sandbox-gated HTML and first-page PDF routes;
 - a conflict-checked per-user installer and ownership-aware uninstaller;

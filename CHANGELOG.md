@@ -13,8 +13,9 @@ All notable changes to this project will be documented here.
 - Preserve one session across navigation with cancellation, stale-result
   protection, stable sizing, a global preparation timeout, and in-window error
   states.
-- Add a deterministic capability registry and universal metadata/text/hex
-  fallback for local regular files without a rich renderer.
+- Add a deterministic capability registry and a calm metadata-only fallback.
+  Remove binary/hex inspection, duplicate filenames, and repeated failure toasts
+  from the normal preview experience.
 - Add bounded, read-only text/source previews that expose deceptive controls and
   never launch executable content.
 - Add a bounded XLSX parser and native spreadsheet view without formula

@@ -285,7 +285,9 @@ class PreviewWindow(Adw.ApplicationWindow):
         if not self._is_current(token):
             return
         try:
-            view = FallbackView(file, info, self._cancellable)
+            view = FallbackView(
+                file, info, self._cancellable, detail=detail if notify else ""
+            )
         except Exception as error:
             if self._session.resolve(token, PreviewState.ERROR, str(error)):
                 self._clear_opening_timeout()
@@ -304,8 +306,6 @@ class PreviewWindow(Adw.ApplicationWindow):
                 info.get_display_name() or file.get_basename() or "File",
                 "File details could not be displayed",
             )
-        if notify:
-            self.show_toast("Rich preview unavailable · showing file details")
 
     def _set_file_title(self, info: Gio.FileInfo) -> None:
         content_type = info.get_content_type()

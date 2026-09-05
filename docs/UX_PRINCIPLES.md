@@ -52,13 +52,15 @@ press Space again.
 Every accessible local regular file gets a meaningful state:
 
 - a rich preview when a safe renderer and its dependencies are available;
-- a universal fallback with name, type, size, timestamp, and bounded text or hex
-  content;
+- a calm unavailable state with type and size, without reading file bytes;
 - an in-window explanation when access or policy prevents reading it.
 
 “Unsupported” describes current renderer capability; it does not end the
 session. Remote locations are not fetched until a narrow portal-based access
 model exists.
+
+The title bar names the file once. Technical failure details are available on
+demand, not the main content. Binary inspection is not part of the preview UI.
 
 ## Keyboard first
 

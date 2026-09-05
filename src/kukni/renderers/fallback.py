@@ -1,242 +1,87 @@
 # Copyright (C) 2026 Kukni contributors
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-"""Universal metadata plus bounded text/hex fallback renderer."""
+"""Calm, metadata-only states when a file cannot be previewed."""
 
 from __future__ import annotations
-
-import string
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, Gtk, Pango
+from gi.repository import Gio, GLib, Gtk
 
-from .text import (
-    TextPreviewError,
-    decode_text_bytes,
-    normalize_visible_text,
-    sanitize_display_label,
-)
+from .text import sanitize_display_label
 
 
-TEXT_SAMPLE_BYTES = 64 * 1024
-HEX_SAMPLE_BYTES = 4 * 1024
-HEX_WIDTH = 16
+def unavailable_message(info: Gio.FileInfo) -> str:
+    """Explain the missing preview without exposing file bytes or internals."""
 
-
-def is_probably_text(data: bytes, content_type: str | None) -> bool:
-    try:
-        decode_text_bytes(data)
-    except (TextPreviewError, TypeError, ValueError):
-        return False
-    return True
-
-
-def format_hex_sample(data: bytes, limit: int = HEX_SAMPLE_BYTES) -> str:
-    lines: list[str] = []
-    printable = frozenset(string.printable.encode("ascii"))
-    for offset in range(0, min(len(data), limit), HEX_WIDTH):
-        chunk = data[offset : offset + HEX_WIDTH]
-        hexadecimal = " ".join(f"{byte:02x}" for byte in chunk)
-        hexadecimal = f"{hexadecimal:<{HEX_WIDTH * 3 - 1}}"
-        characters = "".join(
-            chr(byte) if byte in printable and byte not in b"\r\n\t\x0b\x0c" else "."
-            for byte in chunk
-        )
-        lines.append(f"{offset:08x}  {hexadecimal}  |{characters}|")
-    return "\n".join(lines)
-
-
-def format_modified(info: Gio.FileInfo) -> str:
-    modified = info.get_modification_date_time()
-    if modified is None:
-        return "Unknown"
-    return modified.to_local().format("%Y-%m-%d %H:%M:%S") or "Unknown"
+    if info.get_file_type() == Gio.FileType.DIRECTORY:
+        return "Folder previews aren't available yet."
+    if info.get_file_type() != Gio.FileType.REGULAR:
+        return "This item doesn't have a preview."
+    if info.get_size() == 0:
+        return "This file is empty."
+    return "A preview isn't available for this file type yet."
 
 
 class FallbackView(Gtk.Box):
-    """Always-useful preview content for files without a rich renderer."""
+    """An unavailable preview is not a byte inspector or a second file manager."""
 
     def __init__(
         self,
         file: Gio.File,
         info: Gio.FileInfo,
         cancellable: Gio.Cancellable,
+        *,
+        detail: str = "",
     ) -> None:
+        # @decision Never open the selected file in the fallback. Text belongs
+        # to the text renderer; binary data and document source are not useful
+        # substitutes for a picture or page. The title bar already names it.
         super().__init__(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=18,
-            margin_top=36,
+            spacing=12,
+            margin_top=32,
             margin_bottom=32,
-            margin_start=48,
-            margin_end=48,
+            margin_start=32,
+            margin_end=32,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
         )
         self.add_css_class("fallback-view")
-        self._file = file
-        self._info = info
-        self._cancellable = cancellable
-        self._stream: Gio.InputStream | None = None
-
-        identity = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
-        identity.set_halign(Gtk.Align.CENTER)
-
-        icon = Gtk.Image(gicon=info.get_icon(), pixel_size=72)
-        icon.add_css_class("fallback-icon")
-        identity.append(icon)
-
-        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        labels.set_valign(Gtk.Align.CENTER)
-        name = Gtk.Label(
-            label=sanitize_display_label(info.get_display_name()),
-            xalign=0,
+        self.append(Gtk.Image(gicon=info.get_icon(), pixel_size=64))
+        heading = Gtk.Label(label="Preview unavailable")
+        heading.add_css_class("title-2")
+        self.append(heading)
+        message = Gtk.Label(
+            label=unavailable_message(info),
+            wrap=True,
+            justify=Gtk.Justification.CENTER,
+            max_width_chars=44,
         )
-        name.add_css_class("title-2")
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        labels.append(name)
+        self.append(message)
 
         content_type = info.get_content_type()
-        description = (
-            Gio.content_type_get_description(content_type) if content_type else None
-        )
-        kind = Gtk.Label(label=description or "Unknown file type", xalign=0)
-        kind.add_css_class("dim-label")
-        labels.append(kind)
-        identity.append(labels)
-        self.append(identity)
-
-        if info.get_attribute_boolean(Gio.FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE):
-            self.append(self._executable_banner())
-
-        metadata = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-        metadata.set_halign(Gtk.Align.CENTER)
-        metadata.append(self._metadata_item("Size", GLib.format_size(info.get_size())))
-        metadata.append(self._metadata_item("Modified", format_modified(info)))
-        metadata.append(
-            self._metadata_item("MIME type", info.get_content_type() or "Unknown")
-        )
-        self.append(metadata)
-
-        self._sample_title = Gtk.Label(label="Inspecting file…", xalign=0)
-        self._sample_title.add_css_class("heading")
-        self.append(self._sample_title)
-
-        scroller = Gtk.ScrolledWindow(
-            hexpand=True,
-            vexpand=True,
-            has_frame=True,
-            min_content_height=220,
-        )
-        scroller.add_css_class("fallback-sample")
-        self._text = Gtk.TextView(
-            editable=False,
-            cursor_visible=False,
-            focusable=False,
-            accepts_tab=False,
-            monospace=True,
-            wrap_mode=Gtk.WrapMode.NONE,
-            top_margin=16,
-            bottom_margin=16,
-            left_margin=18,
-            right_margin=18,
-        )
-        self._text.set_accessible_role(Gtk.AccessibleRole.GROUP)
-        scroller.set_child(self._text)
-        self.append(scroller)
-
+        kind = Gio.content_type_get_description(content_type) if content_type else None
+        summary = kind or "File"
         if info.get_file_type() == Gio.FileType.REGULAR:
-            self._load_sample()
-        else:
-            self._show_message("Content sample unavailable for this file type")
+            summary += f" · {GLib.format_size(info.get_size())}"
+        caption = Gtk.Label(label=summary, wrap=True)
+        caption.add_css_class("dim-label")
+        caption.add_css_class("caption")
+        self.append(caption)
 
-    @staticmethod
-    def _metadata_item(label: str, value: str) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_size_request(140, -1)
-        value_label = Gtk.Label(
-            label=value,
-            ellipsize=Pango.EllipsizeMode.END,
-        )
-        value_label.add_css_class("caption-heading")
-        value_label.set_tooltip_text(value)
-        box.append(value_label)
-        key_label = Gtk.Label(label=label)
-        key_label.add_css_class("caption")
-        key_label.add_css_class("dim-label")
-        box.append(key_label)
-        return box
-
-    def _load_sample(self) -> None:
-        self._file.read_async(
-            GLib.PRIORITY_DEFAULT,
-            self._cancellable,
-            self._on_file_opened,
-        )
-
-    def _on_file_opened(self, file: Gio.File, result: Gio.AsyncResult) -> None:
-        try:
-            self._stream = file.read_finish(result)
-            self._stream.read_bytes_async(
-                TEXT_SAMPLE_BYTES,
-                GLib.PRIORITY_DEFAULT,
-                self._cancellable,
-                self._on_sample_read,
-            )
-        except GLib.Error as error:
-            if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED):
-                self._show_message("Content sample could not be read")
-
-    def _on_sample_read(
-        self,
-        stream: Gio.InputStream,
-        result: Gio.AsyncResult,
-    ) -> None:
-        try:
-            sample = bytes(stream.read_bytes_finish(result).get_data())
-        except GLib.Error as error:
-            if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED):
-                self._show_message("Content sample could not be read")
-            return
-        finally:
-            self._close_stream()
-
-        if not sample:
-            self._show_message("This file is empty")
-        elif is_probably_text(sample, self._info.get_content_type()):
-            self._sample_title.set_label("Text sample · first 64 KiB")
-            self._text.get_buffer().set_text(
-                normalize_visible_text(decode_text_bytes(sample))
-            )
-        else:
-            self._sample_title.set_label("Hex sample · first 4 KiB")
-            self._text.get_buffer().set_text(format_hex_sample(sample))
-
-    def _show_message(self, message: str) -> None:
-        self._sample_title.set_label("Universal preview")
-        self._text.get_buffer().set_text(message)
-
-    @staticmethod
-    def _executable_banner() -> Gtk.Widget:
-        banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        banner.add_css_class("card")
-        banner.set_halign(Gtk.Align.CENTER)
-        banner.append(Gtk.Image(icon_name="security-high-symbolic", pixel_size=24))
-        banner.append(
-            Gtk.Label(
-                label=(
-                    "Executable file · Kukni only inspects bytes and never runs it"
-                ),
+        # Keep actionable failure information available without making decoder
+        # diagnostics the main content or showing a toast on every selection.
+        if detail:
+            expander = Gtk.Expander(label="Details")
+            diagnostic = Gtk.Label(
+                label=sanitize_display_label(detail)[:512],
                 wrap=True,
+                selectable=True,
+                max_width_chars=44,
+                margin_top=8,
             )
-        )
-        return banner
-
-    def _close_stream(self) -> None:
-        stream = self._stream
-        self._stream = None
-        if stream is None:
-            return
-        try:
-            stream.close(None)
-        except GLib.Error:
-            pass
+            expander.set_child(diagnostic)
+            self.append(expander)
