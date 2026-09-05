@@ -64,7 +64,7 @@ class RendererRegistryTests(unittest.TestCase):
     def test_default_registry_has_deterministic_built_in_order(self):
         self.assertEqual(
             tuple(renderer.id for renderer in default_registry().renderers),
-            ("cr2", "xlsx", "pdf", "html", "text"),
+            ("cr2", "image", "xlsx", "pdf", "html", "text"),
         )
 
     def test_media_renderer_remains_available_for_explicit_opt_in(self):

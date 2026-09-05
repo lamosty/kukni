@@ -250,8 +250,23 @@ def extract_and_decode(
     if jpeg_size <= 0 or jpeg_size > arguments["max_jpeg_bytes"]:
         raise WorkerError("embedded JPEG exceeds its size limit")
 
+    return decode_image(
+        arguments,
+        "jpeg",
+        (data[start : min(start + READ_CHUNK_BYTES, preview.end)]
+         for start in range(preview.start, preview.end, READ_CHUNK_BYTES)),
+    )
+
+
+def decode_image(arguments, loader_type, chunks):
+    """Share dimension limits, orientation, and RGBA validation with raster files.
+
+    The caller chooses an allowlisted decoder from file magic, never a worker-
+    selected URI or an unrestricted auto-loader (notably SVG/network content).
+    """
+
     try:
-        loader = GdkPixbuf.PixbufLoader.new_with_type("jpeg")
+        loader = GdkPixbuf.PixbufLoader.new_with_type(loader_type)
     except GLib.Error as error:
         raise WorkerError("JPEG decoder is unavailable") from error
     dimensions = [0, 0]
@@ -289,14 +304,11 @@ def extract_and_decode(
     loader.connect("size-prepared", size_prepared)
     closed = False
     try:
-        cursor = preview.start
-        while cursor < preview.end:
-            chunk_end = min(cursor + READ_CHUNK_BYTES, preview.end)
-            if not loader.write(data[cursor:chunk_end]):
+        for chunk in chunks:
+            if not loader.write(chunk):
                 raise WorkerError("embedded JPEG decode failed")
             if dimension_error:
                 raise WorkerError("embedded JPEG dimensions exceed the limit")
-            cursor = chunk_end
         if not loader.close():
             raise WorkerError("embedded JPEG decode failed")
         closed = True
@@ -306,6 +318,8 @@ def extract_and_decode(
         if pixbuf is None:
             raise WorkerError("embedded JPEG decode failed")
         oriented = pixbuf.apply_embedded_orientation() or pixbuf
+        if pixbuf.get_option("orientation") in ("5", "6", "7", "8"):
+            dimensions.reverse()
         rgba = (
             oriented
             if oriented.get_has_alpha()

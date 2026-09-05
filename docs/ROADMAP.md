@@ -13,6 +13,7 @@ The `main` branch already provides:
 - one persistent preview window with cancellation and stale-result protection;
 - standalone Canon CR2 previews using the embedded display JPEG in a bounded,
   killable decoder worker that returns validated raw RGBA;
+- common raster-image previews through that same process boundary;
 - bounded text/source previews and a metadata-only unavailable state;
 - a bounded native XLSX view that does not execute formulas or active content;
 - sandbox-gated HTML and first-page PDF routes;
@@ -20,8 +21,8 @@ The `main` branch already provides:
 - synthetic parser, renderer, integration, and install tests.
 
 This is enough to test Kukni as an independent previewer, but it is not yet a
-broad-format daily-driver release. Common image formats, non-CR2 camera RAW,
-audio, and video currently use the fallback view.
+broad-format daily-driver release. SVG, HEIC, non-CR2 camera RAW, audio, and
+video currently use the fallback view.
 
 ## 0.1 — Standalone preview release
 
@@ -39,7 +40,7 @@ Before the first tagged release:
 
 Make Kukni immediately useful for the most common visual files:
 
-- add bounded JPEG, PNG, WebP, GIF, TIFF, and SVG preview paths;
+- complete image interaction and add an isolated SVG preview path;
 - keep native image decoders outside the long-lived GTK process and pass
   bounded pixel payloads—not worker-selected encoded content—back to the UI;
 - add a tested filesystem and network isolation boundary for the CR2 worker

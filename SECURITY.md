@@ -30,8 +30,10 @@ previewing.
 The standalone application currently applies these boundaries:
 
 - only native local regular files reach content renderers;
-- text, fallback, XLSX, PDF, and HTML paths have explicit input and output
+- text, XLSX, PDF, and HTML paths have explicit input and output
   ceilings plus cancellation or deadlines;
+- unavailable previews use queried metadata only; the fallback never reads
+  selected file bytes;
 - the XLSX parser ignores active parts and external relationships and exposes
   cached formula values only;
 - CR2 extraction, JPEG decode, embedded orientation, and downscaling run in one
@@ -66,6 +68,12 @@ during the worker's short lifetime. Passing fixed inherited descriptors is the
 protocol's intended access pattern; it is not a filesystem or network security
 boundary.
 
+Ordinary PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO files use the same worker
+contract and share CR2's one admission slot, with a 64 MiB input ceiling. The
+helper chooses an allowlisted raster decoder from file magic; arbitrary
+installed loaders and SVG are not reachable through this route. The source
+worker has the same filesystem/network isolation limitation described above.
+
 ## Disabled paths and current gaps
 
 Automatic audio/video routing remains disabled. The disposable media worker has
@@ -73,9 +81,9 @@ network and PID namespaces, per-process resource limits, fixed descriptors, a
 hard parent deadline, and strict output validation, but it lacks a proven
 aggregate process-tree/task boundary for compromised decoder code.
 
-Common JPEG, PNG, and other image formats plus non-CR2 camera RAW formats do not
-yet have rich standalone routes. They use the universal fallback. No GNOME
-Sushi plugin integration ships with Kukni.
+SVG, HEIC, and non-CR2 camera RAW formats do not yet have rich standalone routes.
+They use a metadata-only fallback, not XML or byte inspection. No GNOME Sushi
+plugin integration ships with Kukni.
 
 ## Installation boundary
 

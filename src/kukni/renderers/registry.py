@@ -51,6 +51,7 @@ def default_registry() -> RendererRegistry:
 
     from .cr2 import Cr2Renderer
     from .html import HtmlRenderer
+    from .image import ImageRenderer
     from .pdf import PdfRenderer
     from .spreadsheet import SpreadsheetRenderer
     from .text import TextRenderer
@@ -61,6 +62,7 @@ def default_registry() -> RendererRegistry:
     return RendererRegistry(
         (
             Cr2Renderer(),
+            ImageRenderer(),
             SpreadsheetRenderer(),
             PdfRenderer(),
             HtmlRenderer(),

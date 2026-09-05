@@ -6,19 +6,20 @@ test-python:
 	python3 -m unittest discover -s tests -v
 
 test-shell:
-	sh -n install.sh uninstall.sh tests/test_install.sh
+	sh -n install.sh uninstall.sh tests/test_install.sh tests/run-ui.sh
 
 test-install:
 	./tests/test_install.sh
 
 test-ui:
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_app.py
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_renderer_contract.py
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_html.py
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_xlsx.py
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_pdf.py
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_media.py
-	dbus-run-session -- xvfb-run -a -s '-screen 0 1280x800x24' python3 tests/smoke_text.py
+	./tests/run-ui.sh python3 tests/smoke_app.py
+	./tests/run-ui.sh python3 tests/smoke_renderer_contract.py
+	./tests/run-ui.sh python3 tests/smoke_images.py
+	./tests/run-ui.sh python3 tests/smoke_html.py
+	./tests/run-ui.sh python3 tests/smoke_xlsx.py
+	./tests/run-ui.sh python3 tests/smoke_pdf.py
+	./tests/run-ui.sh python3 tests/smoke_media.py
+	./tests/run-ui.sh python3 tests/smoke_text.py
 
 test-corpus:
 	test -n "$(CR2_SAMPLE_DIR)"

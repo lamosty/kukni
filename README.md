@@ -28,6 +28,8 @@ _Kukni_ is colloquial Slovak for “take a look.”
   same preview window stays open.
 - Preview Canon CR2 photographs from the camera-generated JPEG already embedded
   in the RAW container, without developing or altering the sensor data.
+- See PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO images as pictures, including
+  transparency and automatic embedded orientation. Animated files show a still.
 - Read bounded, read-only previews of text, source code, configuration, logs,
   JSON, XML, CSV, Markdown, and similar files.
 - Inspect the first visible worksheet of an XLSX file without starting an
@@ -51,7 +53,8 @@ Kukni accepts local regular files only. It does not fetch remote locations.
 | HTML | Available only with WebKitGTK 6 and a working process sandbox; scripts, network access, and broad local-file access stay disabled |
 | PDF | First page only, using Poppler inside a working bubblewrap sandbox |
 | Canon CR2 | Camera-generated embedded JPEG, automatically oriented and fit to the window |
-| Other images and camera RAW | File details; dedicated renderers are not connected yet |
+| PNG, JPEG, WebP, GIF, TIFF, BMP, ICO | Bounded image preview; static frame only; WebP requires its GdkPixbuf loader |
+| SVG, HEIC, other images and camera RAW | File details; dedicated renderers are not connected yet |
 | Audio and video | File details; automatic media decoding is deliberately disabled |
 | Other local files | A plain “Preview unavailable” state with type and size; no byte inspection |
 
@@ -82,13 +85,17 @@ Ubuntu target. During its short lifetime it still has ordinary same-user
 filesystem and network access. The descriptor-only protocol is an intended
 access boundary, not a complete sandbox.
 
+Ordinary raster images reuse this same process boundary, with a 64 MiB input
+limit and the same pixel, CPU, memory, and deadline limits. They do not gain a
+filesystem/network sandbox merely by using a different image format.
+
 ## Install for your user
 
 Kukni currently installs from source. On Ubuntu 24.04, install the core runtime
 dependencies:
 
 ```sh
-sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 util-linux
+sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 util-linux webp-pixbuf-loader
 ```
 
 Then install Kukni without `sudo`:

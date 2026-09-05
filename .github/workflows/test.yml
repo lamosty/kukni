@@ -26,7 +26,13 @@ jobs:
             gir1.2-gst-plugins-base-1.0 \
             gir1.2-gstreamer-1.0 \
             gir1.2-gtk-4.0 \
-            python3-gi
+            python3-gi \
+            webp-pixbuf-loader \
+            xvfb \
+            xauth
 
       - name: Run tests
         run: make test
+
+      - name: Verify real GTK previews and navigation
+        run: make test-ui

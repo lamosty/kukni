@@ -126,6 +126,7 @@ for required_source in \
     "$script_dir/bin/kukni" \
     "$script_dir/src/kukni/__init__.py" \
     "$script_dir/helpers/kukni-cr2-worker.py" \
+    "$script_dir/helpers/kukni-image-worker.py" \
     "$script_dir/helpers/kukni-extract-preview.py" \
     "$script_dir/helpers/kukni-media-worker.py" \
     "$script_dir/uninstall.sh" \

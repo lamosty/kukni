@@ -43,6 +43,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from ..worker import terminate_process_group
 from .base import ErrorCallback, ReadyCallback
+from .image_view import ImagePreviewView
 
 
 PROTOCOL_VERSION = 1
@@ -760,55 +761,15 @@ def _check_cancelled(cancelled: CancellationCheck | None) -> None:
         raise Cr2PreviewCancelled("CR2 preview cancelled")
 
 
-class Cr2PreviewView(Gtk.Box):
-    """A stable fit-to-window canvas for one validated raw worker frame."""
-
-    def __init__(
-        self,
-        texture: Gdk.Texture,
-        source_width: int,
-        source_height: int,
-    ) -> None:
-        width = texture.get_width()
-        height = texture.get_height()
-        if (
-            width <= 0
-            or height <= 0
-            or width > DEFAULT_LIMITS.max_render_edge
-            or height > DEFAULT_LIMITS.max_render_edge
-            or width * height > DEFAULT_LIMITS.max_render_pixels
-        ):
-            raise Cr2PreviewError("The CR2 texture dimensions are invalid")
-        super().__init__(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=0,
-            hexpand=True,
-            vexpand=True,
-        )
-        self.texture = texture
-        self.picture = Gtk.Picture(
-            paintable=texture,
-            content_fit=Gtk.ContentFit.CONTAIN,
-            can_shrink=True,
-            hexpand=True,
-            vexpand=True,
-        )
-        self.picture.set_focusable(False)
-        self.picture.set_can_focus(False)
-        self.append(self.picture)
-        status = Gtk.Label(
-            label=f"Embedded JPEG · {source_width} × {source_height} · Fit",
-        )
-        status.set_margin_bottom(10)
-        status.add_css_class("caption")
-        status.add_css_class("dim-label")
-        self.append(status)
+class Cr2PreviewView(ImagePreviewView):
+    """CR2 and ordinary photographs share the same content-first canvas."""
 
 
 class Cr2Renderer:
     """Prepare CR2 previews in one externally bounded decoder worker."""
 
     id = "cr2"
+    preview_subtitle = "Canon CR2 image · embedded JPEG · fit"
 
     def __init__(self) -> None:
         self._pending_id = 0
@@ -862,7 +823,7 @@ class Cr2Renderer:
             delivery_owns_slot = False
             error_message: str | None = None
             try:
-                output = run_cr2_worker(path, cancelled=cancellable.is_cancelled)
+                output = self._prepare(path, cancelled=cancellable.is_cancelled)
                 try:
                     source_id = GLib.idle_add(
                         self._deliver_preview,
@@ -910,6 +871,12 @@ class Cr2Renderer:
             self.render(file, info, cancellable, on_ready, on_error)
         return GLib.SOURCE_REMOVE
 
+    def _prepare(self, path, *, cancelled):
+        return run_cr2_worker(path, cancelled=cancelled)
+
+    def _create_view(self, texture, result):
+        return Cr2PreviewView(texture, result.source_width, result.source_height)
+
     @staticmethod
     def _queue_error(
         cancellable: Gio.Cancellable,
@@ -931,8 +898,8 @@ class Cr2Renderer:
             on_error(message)
         return GLib.SOURCE_REMOVE
 
-    @staticmethod
     def _deliver_preview(
+        self,
         cancellable: Gio.Cancellable,
         on_ready: ReadyCallback,
         on_error: ErrorCallback,
@@ -952,12 +919,8 @@ class Cr2Renderer:
                 pixel_bytes,
                 result.stride,
             )
-            view = Cr2PreviewView(
-                texture,
-                result.source_width,
-                result.source_height,
-            )
-            on_ready(view, "Canon CR2 image · embedded JPEG · fit")
+            view = self._create_view(texture, result)
+            on_ready(view, self.preview_subtitle)
         except (GLib.Error, Cr2PreviewError, TypeError, ValueError):
             on_error("The decoded CR2 preview could not be displayed")
         finally:

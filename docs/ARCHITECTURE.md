@@ -19,6 +19,7 @@ Nautilus Space key                         `kukni FILE`
                                   local-file and capability probe
                                                │
                   ├─ Canon CR2 → disposable decode worker → raw RGBA
+                  ├─ raster images → same bounded pixel contract → raw RGBA
                   ├─ native XLSX table
                   ├─ gated PDF worker
                   ├─ gated HTML renderer
@@ -131,8 +132,11 @@ aggregate process-tree and task containment required for automatic decoding of
 untrusted media. Enabling it requires a tested cgroup or equivalent no-fork
 boundary plus packaged sandbox integration tests.
 
-Common image formats and non-CR2 camera RAW formats still reach the universal
-fallback. No GNOME Sushi plugin integration ships with Kukni.
+PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO have an automatic raster route. It
+reuses the existing CR2 supervisor, descriptor contract, decoder validation,
+and global admission slot rather than introducing another worker framework.
+SVG and other unrouted images remain metadata-only, never source-code views.
+No GNOME Sushi plugin integration ships with Kukni.
 
 ## Extension boundaries
 

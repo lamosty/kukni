@@ -229,6 +229,10 @@ def supports_text(filename: str | None, content_type: str | None) -> bool:
     """Identify text conservatively without claiming native executables."""
 
     media_type = (content_type or "").split(";", 1)[0].strip().casefold()
+    if media_type.startswith("image/"):
+        # SVG is an image, not a successful source-code preview just because
+        # its encoding is XML. Unavailable visual formats keep a clean card.
+        return False
     if media_type in BINARY_EXECUTABLE_TYPES:
         return False
     if media_type.startswith("text/") or (

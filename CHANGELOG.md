@@ -6,6 +6,11 @@ All notable changes to this project will be documented here.
 
 ### Standalone application
 
+- Add real PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO previews using the bounded
+  CR2 pixel-worker contract, with orientation, transparency, and dimension limits.
+- Require real image-worker success and run isolated GTK smoke tests in CI;
+  visual XML formats no longer masquerade as successful source previews.
+
 - Keep the latest photograph pending while a cancelled decoder finishes;
   rapid navigation no longer turns a temporarily busy worker into a failure.
 
