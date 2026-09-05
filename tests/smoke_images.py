@@ -80,16 +80,19 @@ class NativeKeys:
 
 
 class ImageSmoke(Adw.Application):
-    def __init__(self, root, screenshots, native_input=False):
+    def __init__(self, root, screenshots, native_input=False, dark=False):
         super().__init__(application_id='io.github.lamosty.Kukni.ImageSmoke')
         self.root, self.screenshots = root, screenshots
         self.failures = []
         self.window = None
         self.surface = None
         self.native_keys = NativeKeys() if native_input else None
+        self.dark = dark
 
     def do_activate(self):
         self.hold()
+        if self.dark:
+            Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         KukniApplication._load_styles()
         self.window = PreviewWindow(self)
         self.steps = self.run_checks()
@@ -121,7 +124,7 @@ class ImageSmoke(Adw.Application):
         else:
             self.window.activate_action(name, None)
 
-    def ready(self, name):
+    def ready(self, name, capture_name=None):
         for _ in range(200):
             if self.window.session.snapshot.state is not PreviewState.OPENING:
                 break
@@ -145,7 +148,7 @@ class ImageSmoke(Adw.Application):
             require(view.picture.get_width() <= view.scroller.get_width(), 'Fit canvas overflows horizontally')
             require(view.picture.get_height() <= view.scroller.get_height(), 'Fit canvas overflows vertically')
             require(view._tick_id == 0, 'Idle preview keeps scheduling animation frames')
-        self.snapshot(name.removesuffix('.png').removesuffix('.bin'))
+        self.snapshot(capture_name or name.removesuffix('.png').removesuffix('.bin'))
 
     def view(self):
         view = self.window._stack.get_child_by_name('content')
@@ -242,12 +245,11 @@ class ImageSmoke(Adw.Application):
         require(self.window._sizing.manual, 'Unsolicited resize did not take precedence')
         manual = (self.window.get_width(), self.window.get_height())
         self.show('portrait.png')
-        yield from self.ready('portrait.png')
+        yield from self.ready('portrait.png', 'manual-size-portrait')
         require((self.window.get_width(), self.window.get_height()) == manual, 'Portrait overrode manual size')
         self.show('unknown.bin')
-        yield from self.ready('unknown.bin')
+        yield from self.ready('unknown.bin', 'manual-size-fallback')
         require((self.window.get_width(), self.window.get_height()) == manual, 'Fallback overrode manual size')
-        self.snapshot('manual-size-fallback')
 
         # Empty activation must invalidate in-flight work, not resurrect it.
         self.show('landscape.png')
@@ -275,6 +277,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--screenshots', type=Path)
     parser.add_argument('--native-input', action='store_true', help='Inject real keys on the isolated X11 test display (requires libXtst)')
+    parser.add_argument('--dark', action='store_true', help='Force libadwaita dark appearance for visual QA')
     args = parser.parse_args()
     if args.screenshots:
         args.screenshots.mkdir(parents=True, exist_ok=True)
@@ -283,7 +286,7 @@ def main():
         for name, dimensions in FIXTURES.items():
             (root / name).write_bytes(png(*dimensions, transparent=name == 'portrait.png'))
         (root / 'unknown.bin').write_bytes(b'\0\1\2opaque binary data')
-        app = ImageSmoke(root, args.screenshots, args.native_input)
+        app = ImageSmoke(root, args.screenshots, args.native_input, args.dark)
         status = app.run(['kukni-image-smoke'])
     for failure in app.failures:
         print('Image smoke failure:', failure, file=sys.stderr)
