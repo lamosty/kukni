@@ -32,6 +32,7 @@ class KukniApplication(Adw.Application):
         self._previewer = NautilusPreviewerService(
             self._show_file_from_previewer,
             self._close_from_previewer,
+            self._on_previewer_session_changed,
         )
 
     def do_dbus_register(
@@ -61,6 +62,7 @@ class KukniApplication(Adw.Application):
         self._load_styles()
 
     def do_activate(self) -> None:
+        self._previewer.detach_session()
         self._ensure_window().show_empty()
 
     def do_open(
@@ -69,6 +71,7 @@ class KukniApplication(Adw.Application):
         _number_of_files: int,
         _hint: str,
     ) -> None:
+        self._previewer.detach_session()
         window = self._ensure_window()
         if files:
             window.show_file(files[0])
@@ -81,12 +84,21 @@ class KukniApplication(Adw.Application):
             self._window.connect("destroy", self._on_window_destroyed)
             self._window.connect("navigation-requested", self._on_navigation_requested)
             self._window.connect(
+                "file-chosen", lambda *_args: self._previewer.detach_session()
+            )
+            self._window.connect(
                 "notify::visible",
                 lambda window, _parameter: self._previewer.set_visible(
                     window.get_visible()
                 ),
             )
+            self._on_previewer_session_changed()
         return self._window
+
+    def _on_previewer_session_changed(self) -> None:
+        if self._window is not None:
+            self._window.set_external_parent_handle(self._previewer.parent_handle)
+            self._window.set_navigation_available(self._previewer.navigation_available)
 
     def _on_window_destroyed(self, window: PreviewWindow) -> None:
         if self._window is window:
@@ -99,7 +111,7 @@ class KukniApplication(Adw.Application):
         direction: str,
     ) -> None:
         if not self._previewer.emit_selection(Direction(direction)):
-            window.show_toast("File-manager navigation is not connected yet")
+            window.set_navigation_available(False)
 
     def _show_file_from_previewer(
         self,

@@ -10,7 +10,7 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from gi.repository import Gio
+from gi.repository import Gio, GLib
 
 from kukni.nautilus_previewer import (
     CURRENT_INTERFACE,
@@ -49,13 +49,45 @@ class NautilusPreviewerContractTests(unittest.TestCase):
     def test_selection_event_uses_nautilus_uint32_wire_signature(self):
         service = NautilusPreviewerService(lambda *_args: None, lambda: None)
         service._connection = mock.Mock()
+        service._connection.is_closed.return_value = False
+        service._connection.emit_signal.return_value = True
         service._owns_name = True
+        service._session_sender = ":1.42"
+        service._session_interface = CURRENT_INTERFACE
+        service._parent_handle = "wayland:test"
 
         self.assertTrue(service.emit_selection(Direction.RIGHT))
 
         variant = service._connection.emit_signal.call_args.args[-1]
         self.assertEqual(variant.get_type_string(), "(u)")
         self.assertEqual(variant.unpack(), (5,))
+        self.assertEqual(service._connection.emit_signal.call_args.args[0], ":1.42")
+
+    def test_bus_ownership_alone_is_not_navigation(self):
+        service = NautilusPreviewerService(lambda *_args: None, lambda: None)
+        service._connection = mock.Mock()
+        service._connection.is_closed.return_value = False
+        service._owns_name = True
+
+        self.assertFalse(service.navigation_available)
+        self.assertFalse(service.emit_selection(Direction.RIGHT))
+        service._connection.emit_signal.assert_not_called()
+
+    def test_failed_send_detaches_the_session(self):
+        changed = mock.Mock()
+        service = NautilusPreviewerService(lambda *_args: None, lambda: None, changed)
+        service._connection = mock.Mock()
+        service._connection.is_closed.return_value = False
+        service._owns_name = True
+        service._session_sender = ":1.42"
+        service._session_interface = CURRENT_INTERFACE
+        service._parent_handle = "wayland:test"
+        service._connection.emit_signal.side_effect = [GLib.Error("closed"), True]
+
+        self.assertFalse(service.emit_selection(Direction.RIGHT))
+        self.assertFalse(service.navigation_available)
+        self.assertEqual(service.parent_handle, "")
+        changed.assert_called_once_with()
 
 
 if __name__ == "__main__":
