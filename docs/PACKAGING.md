@@ -104,12 +104,20 @@ fresh packaged profile.
 
 ## Current CI download channel
 
-After unit, GTK, and installed-runtime checks succeed, main-branch push jobs
+After unit, GTK, installed-runtime, and private installed-activation checks
+succeed, main-branch push jobs
 upload `kukni-ubuntu-24.04-<commit>` with the exact tested `.deb` and
 `SHA256SUMS`. Downloads require GitHub sign-in and expire after 30 days. This
 avoids requiring every tester to clone and build, but is not a stable release
 channel, signed package provenance, or automatic update service. Only the
 package and checksum are uploaded, never the checkout or test documents.
+
+`make test-installed` activates the package's actual D-Bus service files in a
+private bus on an isolated display, checks the launched process path, and
+exercises ShowFile and Close. It does not use the user's activation overrides
+and does not infer pixel correctness from a visible window. The installed
+`/usr/bin/kukni --check` and real image UI tests provide the separate rendering
+requirements.
 
 The next public distribution milestone is a versioned GitHub Release download
 with reviewable release notes, followed by a signed APT channel. No release,

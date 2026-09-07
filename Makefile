@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev check package test test-python test-shell test-install test-ui test-corpus install uninstall
+.PHONY: help dev check package test test-python test-shell test-install test-ui test-installed test-corpus install uninstall
 
 # @security GNU Make normally exports command-line variables and expands their
 # contents while constructing a recipe environment. Keep raw FILE out of that
@@ -15,11 +15,12 @@ help:
 	@printf '%s\n' \
 		'Kukni developer commands:' \
 		'  make dev                    Run this checkout without installing' \
-		'  make dev FILE=/path/image  Preview one file from this checkout' \
+		'  make dev FILE=/path/image    Preview one file from this checkout' \
 		'  make check                  Check the installed Kukni runtime' \
 		'  make package                Build a traceable .deb in dist/' \
 		'  make test                   Run the headless test suites' \
-		'  make test-ui                Run isolated display/session UI smoke tests'
+		'  make test-ui                Run isolated display/session UI smoke tests' \
+		'  make test-installed         Test packaged activation in an isolated session'
 
 check:
 	/usr/bin/kukni --check
@@ -49,6 +50,11 @@ test-ui:
 	./tests/run-ui.sh python3 tests/smoke_pdf.py
 	./tests/run-ui.sh python3 tests/smoke_media.py
 	./tests/run-ui.sh python3 tests/smoke_text.py
+
+# @constraint This separate gate requires the Ubuntu package to be installed.
+# Its synthetic activation session never uses the user's D-Bus registrations.
+test-installed:
+	./tests/run-ui.sh python3 tests/smoke_installed_activation.py
 
 test-corpus:
 	test -n "$(CR2_SAMPLE_DIR)"

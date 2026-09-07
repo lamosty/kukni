@@ -249,6 +249,11 @@ renderers are installed:
 make test-ui
 ```
 
+After installing a package, `make test-installed` separately checks its D-Bus
+activation, process origin, ShowFile, and Close in a private display/session.
+It never changes your desktop registration. Visibility is not treated as proof
+of rendered pixels; the image/PDF render checks remain separate requirements.
+
 To test the bounded CR2 extractor against a private camera corpus without
 committing photographs:
 

@@ -50,6 +50,7 @@ jobs:
           python3 packaging/build-deb.py
           sudo apt-get install --yes --no-install-recommends ./dist/kukni_*.deb
           /usr/bin/kukni --check
+          make test-installed
 
       # Keep the exact tested package, not a second unverified rebuild. These
       # expiring CI artifacts are alpha test downloads, not a public release
