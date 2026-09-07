@@ -48,6 +48,11 @@ class NoticeSmoke(Adw.Application):
             self.failures.append("Interactive HTML did not resolve to its native notice within two seconds")
         if not isinstance(view, Gtk.Box) or getattr(view, "preview_geometry", None) != ("fallback", 0, 0):
             self.failures.append("Interactive HTML did not request a compact native card")
+        else:
+            icon = view.get_first_child()
+            theme = Gtk.IconTheme.get_for_display(view.get_display())
+            if not isinstance(icon, Gtk.Image) or not theme.has_icon(icon.get_icon_name()):
+                self.failures.append("HTML notice uses a missing theme icon")
         if self.renderer._loading_views:
             self.failures.append("Interactive HTML unexpectedly started a WebKit view")
         if not self.window.get_visible():

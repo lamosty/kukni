@@ -825,7 +825,7 @@ class HtmlRenderer:
         )
         # An explanation is a compact card, not a large blank HTML viewport.
         page.preview_geometry = ("fallback", 0, 0)
-        page.append(Gtk.Image(icon_name="applications-internet-symbolic", pixel_size=56))
+        page.append(Gtk.Image(icon_name="web-browser-symbolic", pixel_size=56))
         title = Gtk.Label(label="Interactive page not run")
         title.add_css_class("title-2")
         page.append(title)
