@@ -31,6 +31,7 @@ jobs:
             gir1.2-gstreamer-1.0 \
             gir1.2-gtk-4.0 \
             gir1.2-webkit-6.0 \
+            libgtk-4-media-gstreamer \
             libxtst6 \
             poppler-utils \
             python3-gi \
