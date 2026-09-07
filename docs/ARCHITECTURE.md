@@ -18,6 +18,7 @@ Nautilus Space key                         `kukni FILE`
                                                │
                                   local-file and capability probe
                                                │
+                  ├─ folder → bounded immediate-child metadata summary
                   ├─ Canon CR2 → disposable decode worker → raw RGBA
                   ├─ raster images → same bounded pixel contract → raw RGBA
                   ├─ native XLSX table
@@ -81,27 +82,37 @@ and size without reading the file. Technical details are disclosed on demand.
 
 Current automatic routes are:
 
-1. **Canon CR2** — the parent opens one bounded regular file and passes its
-   read-only descriptor to a disposable worker. That worker finds the
-   camera-generated embedded JPEG, decodes it with GdkPixbuf, applies embedded
+1. **Folders** — bounded background enumeration counts immediate items and
+   retains a short sorted sample. A pinned directory and no-follow child metadata
+   prevent implicit link traversal. No recursive total or child content is read;
+   partial counts and direct-file sizes remain explicitly partial.
+2. **Canon CR2 and raster images** — the parent opens one bounded regular file
+   and passes its read-only descriptor to a disposable worker. For CR2 that
+   worker finds the camera-generated embedded JPEG; ordinary images use an
+   allowlisted raster decoder. It decodes with GdkPixbuf, applies embedded
    orientation, downsizes it, and emits only tightly packed raw RGBA plus small
    metadata. The parent rejects source mutation and validates every field and
    byte count before creating a `Gdk.MemoryTexture`; it never decodes
    worker-selected encoded image content.
-2. **XLSX** — a bounded ZIP/XML parser produces an inert model for a native GTK
+3. **XLSX** — a bounded ZIP/XML parser produces an inert model for a native GTK
    table. It reads only the first visible worksheet, shows cached formula values,
    and ignores macros, active content, and external relationships.
-3. **PDF** — sandboxed Poppler tools determine the page count and lazily render
+4. **PDF** — sandboxed Poppler tools determine the page count and lazily render
    one requested page behind `prlimit`, limited to navigation through 500 pages.
+   A native continuous scroller uses cheap page placeholders and retains at most
+   five decoded page textures. Width-fit improves reading; a page-relative anchor
+   keeps scrolling stable when mixed-size placeholders gain real dimensions.
    Requests and pending results are coalesced; outdated work is cancelled.
    Input/output sizes, CPU, address space, descriptors, dimensions, and request
    wall time are bounded. Capability checks run off GTK. An unavailable sandbox
    produces a clear fallback, never an unconfined converter.
-4. **HTML** — WebKitGTK 6 may render a bounded local document only when its
+5. **HTML** — inert, bounded preparation removes active/external resource loaders
+   before WebKit sees the document. Detected app shells get a native explanation.
+   WebKitGTK 6 may render a static local document only when its
    process sandbox is usable. JavaScript, networking, forms, media, broad local
    access, and other active features remain disabled. If that boundary is not
    available, HTML uses the fallback.
-5. **Text/source** — a worker thread reads at most 1 MiB from a verified regular
+6. **Text/source** — a worker thread reads at most 1 MiB from a verified regular
    file. Decoding is strict, deceptive controls are exposed, and executable or
    launcher-like files are displayed rather than run.
 

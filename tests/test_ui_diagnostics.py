@@ -73,7 +73,7 @@ class HtmlPixelVerifierTests(unittest.TestCase):
         self.assertNotEqual(APPLICATION_ID, "io.github.lamosty.Kukni")
         self.assertTrue(application.get_flags() & Gio.ApplicationFlags.NON_UNIQUE)
 
-    def test_settled_check_never_requests_a_pending_snapshot(self):
+    def test_settled_check_ignores_pending_snapshot_tick_and_callback(self):
         application = HtmlSelfTestApplication(Path("/fixed/internal-fixture.html"))
         application._snapshot_document = mock.Mock()
         application._settled = True
@@ -82,6 +82,9 @@ class HtmlPixelVerifierTests(unittest.TestCase):
             GLib.SOURCE_REMOVE,
         )
         application._snapshot_document.get_snapshot.assert_not_called()
+        view = mock.Mock()
+        application._on_snapshot(view, mock.Mock())
+        view.get_snapshot_finish.assert_not_called()
 
     def test_finish_defers_window_close_and_quit_for_renderer_cleanup(self):
         application = HtmlSelfTestApplication(Path("/fixed/internal-fixture.html"))

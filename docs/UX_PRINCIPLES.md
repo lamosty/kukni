@@ -12,19 +12,27 @@ sequence of miniature applications. The content matters more than its chrome.
 - `F` or `F11` toggles fullscreen. `Ctrl+O` opens a direct-launch file chooser.
 - The header names the file once. **Info** (`Ctrl+I`) reveals type, file size,
   retained image dimensions, and preview details. It does not parse EXIF/GPS.
-- Images and rendered PDF pages have native **Fit**, **−**, **+**, and **1:1**
+- Images and PDF documents have native **Fit**, **−**, **+**, and **1:1**
   controls. Keyboard equivalents are `0`, `-`, `+` (or `=`), and `1`.
 - Ctrl+wheel zooms. At enlarged scales, drag the canvas or use its scrollbars
   to pan. Ordinary wheel scrolling remains native scrolling.
 - PDF page buttons and Page Up/Page Down move inside the document; arrow keys
   remain reserved for file-manager navigation.
+- PDFs open at the top in **Fit width**, not a tiny whole-page thumbnail.
+  Ordinary wheel/touchpad scrolling moves continuously through page boundaries.
+  Visible/nearby pages load lazily; a failed page stays an in-document notice.
+  Scrolling or changing pages preserves zoom and never resizes the window.
 
 **1:1 refers to retained preview pixels, not guaranteed original-file detail.**
 One retained pixel maps to one logical display unit; HiDPI physical pixels may
 be denser. If safety limits downscaled a photograph, the tooltip says so and
 Info shows source and preview dimensions. A PDF page is a bounded raster, not
-an unlimited vector zoom. Zoom does not re-decode or allocate a larger texture.
+an unlimited vector zoom. Zoom scales retained pixels rather than requesting
+higher-resolution textures.
 Fit preserves aspect ratio and does not upscale small images by default.
+For PDFs, Fit means page-column width; its zoom percentage is relative to that
+width until **1:1** selects retained-pixel sizing. Lazy changes in page dimensions
+preserve the reader's page-relative scroll position.
 
 ## Session continuity
 
@@ -79,11 +87,23 @@ Focus or selection must not snap back to A; Space is not required again.
 
 ## Universal usefulness
 
-Every accessible local regular file gets a meaningful state:
+Every accessible local regular file or folder gets a meaningful state:
 
 - a rich preview when its safe renderer and dependencies are available;
 - a calm unavailable state with type and size, without reading file bytes;
 - an in-window explanation when access or policy prevents reading it.
+
+Folders are not unsupported files. Their overview shows immediate file/folder
+counts, hidden items, direct regular-file bytes, and a short list of children.
+It never presents a directory's inode size as a folder total. Enumeration is
+bounded and non-recursive; incomplete counts and sizes are labelled as partial.
+Empty folders are a normal, friendly state, not an error.
+
+HTML is a passive document preview, not a browser session. Self-contained static
+markup remains useful; scripts, external frames, and resource loaders are
+removed before loading. A detected interactive app shell gets a native
+explanation without starting WebKit. Engine failures/timeouts stop that preview's
+work while leaving Kukni open for another file.
 
 “Unsupported” describes renderer capability, not the end of a session.
 Technical failure details are on demand, not the main content. Binary

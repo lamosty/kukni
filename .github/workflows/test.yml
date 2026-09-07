@@ -21,6 +21,9 @@ jobs:
           # otherwise newer build sort older than an installed alpha.
           fetch-depth: 0
 
+      # WebKit brings the codecs that make the optional media smoke runnable;
+      # GTK's separately packaged media backend must be present too. This does
+      # not enable automatic media routing in the application.
       - name: Install runtime test dependencies
         run: |
           sudo apt-get update

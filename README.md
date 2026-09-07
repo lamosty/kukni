@@ -35,8 +35,11 @@ _Kukni_ is colloquial Slovak for “take a look.”
 - Inspect the first visible worksheet of an XLSX file without starting an
   office suite, evaluating formulas, running macros, or following external
   links.
-- Browse PDF pages with fit, zoom, and page controls when the required sandbox
-  is installed. Optional HTML previews keep active content disabled.
+- Scroll naturally through PDF documents, with readable width-fit pages, zoom,
+  and page controls when the required sandbox is installed.
+- See a folder's item counts, direct-file sizes, and a short list of children.
+- Preview static HTML without running scripts or fetching external resources.
+  Interactive web-app exports get an explanation instead of a blank page.
 - Use content-shaped windows, zoom and pan, and an on-demand Info panel.
   Changing a file keeps the same window alive; manual resizing takes precedence.
 - Keep browsing unsupported files with a simple file card and a clear
@@ -44,7 +47,8 @@ _Kukni_ is colloquial Slovak for “take a look.”
 - Open a file directly with `kukni FILE`, or choose one inside the app with
   <kbd>Ctrl</kbd>+<kbd>O</kbd>.
 
-Kukni accepts local regular files only. It does not fetch remote locations.
+Kukni previews local regular files and folder summaries. It does not fetch
+remote locations.
 
 ### Current format limits
 
@@ -52,8 +56,9 @@ Kukni accepts local regular files only. It does not fetch remote locations.
 | --- | --- |
 | Text and source | Read-only, bounded to the first 1 MiB; hidden controls are made visible |
 | XLSX | Bounded native table for the first visible worksheet; cached values only |
-| HTML | Available only with WebKitGTK 6 and a working process sandbox; scripts, network access, and broad local-file access stay disabled |
-| PDF | Lazy page navigation through the first 500 pages, fit/zoom; requires a working bubblewrap sandbox |
+| HTML | Static documents require WebKitGTK 6 and its sandbox; scripts and external resources are omitted. Script-dependent app shells get a native explanation, not a running web app |
+| PDF | Continuous scrolling through the first 500 pages with lazy, bounded page caching, width-fit and zoom; requires a working bubblewrap sandbox |
+| Folders | Bounded immediate-child counts, direct-file sizes, and a sample of items; no recursive size scan or link traversal |
 | Canon CR2 | Camera-generated embedded JPEG, automatically oriented and fit to the window |
 | PNG, JPEG, WebP, GIF, TIFF, BMP, ICO | Bounded image preview; static frame only; WebP requires its GdkPixbuf loader |
 | SVG, HEIC, other images and camera RAW | File details; dedicated renderers are not connected yet |
@@ -183,6 +188,7 @@ old builds. Package building changes no system files and needs no root. See
 | <kbd>+</kbd> / <kbd>−</kbd> | Zoom the image or PDF preview |
 | <kbd>0</kbd> / <kbd>1</kbd> | Fit / 1:1 retained preview pixels |
 | <kbd>Ctrl</kbd>+wheel / drag | Zoom / pan an enlarged preview |
+| Wheel or touchpad | Scroll within and between PDF pages |
 | <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | Previous / next PDF page |
 | <kbd>Ctrl</kbd>+<kbd>I</kbd> | Show or hide file information |
 
@@ -252,7 +258,10 @@ make test-ui
 After installing a package, `make test-installed` separately checks its D-Bus
 activation, process origin, ShowFile, and Close in a private display/session.
 It never changes your desktop registration. Visibility is not treated as proof
-of rendered pixels; the image/PDF render checks remain separate requirements.
+of rendered pixels; image/PDF checks remain separate requirements. With WebKit
+installed, it also verifies actual static HTML pixels using the packaged
+`--check-html` command, not an unconfined source substitute. The normal
+`--check` command remains headless and reports only HTML prerequisites.
 
 To test the bounded CR2 extractor against a private camera corpus without
 committing photographs:

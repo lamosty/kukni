@@ -17,8 +17,11 @@ The `main` branch already provides:
 - adaptive window sizing, image/PDF fit and zoom, and file information on demand;
 - explicit file-manager session ownership and a bounded memory-only image cache;
 - bounded text/source previews and a metadata-only unavailable state;
+- native folder summaries with bounded immediate-item counts and direct-file sizes;
 - a bounded native XLSX view that does not execute formulas or active content;
-- sandbox-gated HTML and lazy PDF page navigation;
+- passive HTML preparation with clear interactive-app notices, and sandbox-gated
+  static HTML rendering;
+- continuous width-fit PDF scrolling with lazy page rendering and bounded caching;
 - a no-install, separately identified development mode;
 - legacy per-user migration with an ownership-aware uninstaller;
 - an Ubuntu package builder, tested CI alpha downloads, and activation-aware

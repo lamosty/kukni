@@ -29,7 +29,8 @@ previewing.
 
 The standalone application currently applies these boundaries:
 
-- only native local regular files reach content renderers;
+- only native local regular files reach document content renderers; a separate
+  folder renderer reads bounded immediate-child metadata, not child content;
 - text, XLSX, PDF, and HTML paths have explicit input and output
   ceilings plus cancellation or deadlines;
 - unavailable previews use queried metadata only; the fallback never reads
@@ -41,9 +42,13 @@ The standalone application currently applies these boundaries:
   creates a memory texture without decoding worker-selected encoded content;
 - HTML requires WebKitGTK's process sandbox and disables JavaScript, networking,
   media, forms, broad local-file access, and other active features;
+- HTML's static preparation removes active/external loaders for availability,
+  but is not a replacement for the required CSP/settings/process sandbox;
 - PDF rendering occurs in a short-lived bubblewrap namespace behind process
   resource limits and a wall deadline; pdfinfo shares that boundary, metadata
   output is capped at 64 KiB, and navigation is limited to 500 pages;
+- continuous PDF scrolling retains at most five page textures rather than
+  eagerly decoding the entire document;
 - optional sandbox-gated routes fall back when the required boundary cannot be
   established;
 - asynchronous results are generation-checked so canceled work cannot replace a
