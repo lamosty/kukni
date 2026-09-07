@@ -15,8 +15,12 @@ development setup command.
 Use `make check` for the installed package and `make package` only to prepare an
 actual upgrade. Package versions require clean commits and complete Git history.
 Source PDF/HTML may fall back under Ubuntu namespace restrictions; do not alter
-system security to hide that difference. Installed-package CI must render a real
-PNG and PDF. See the README for one-time development dependencies.
+system security to hide that difference or borrow another app's profile.
+Installed-package CI must render a real PNG, PDF, and fixed static HTML page.
+The explicit `/usr/bin/kukni --check-html` requires a display and briefly opens a
+synthetic test window; `make test-installed` runs it on an isolated display with
+an outer hard timeout. Default `--check` remains headless. See the README for
+one-time development dependencies.
 
 ## Before opening a pull request
 

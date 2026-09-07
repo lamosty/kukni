@@ -55,6 +55,7 @@ test-ui:
 # Its synthetic activation session never uses the user's D-Bus registrations.
 test-installed:
 	./tests/run-ui.sh python3 tests/smoke_installed_activation.py
+	./tests/run-ui.sh timeout --kill-after=2s 20s /usr/bin/kukni --check-html
 
 test-corpus:
 	test -n "$(CR2_SAMPLE_DIR)"

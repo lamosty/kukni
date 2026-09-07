@@ -9,7 +9,9 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -77,6 +79,7 @@ class DevelopmentLauncherTests(unittest.TestCase):
         self.assertIn("sandboxes remain mandatory", output.getvalue())
         self.assertIn("/usr/bin/kukni --check", output.getvalue())
         self.assertIn("may remain unavailable even when the package is installed", output.getvalue())
+        self.assertIn("--check-html", output.getvalue())
 
     def test_check_and_version_remain_headless_launcher_actions(self):
         with mock.patch.object(launcher, "_diagnostics_main", return_value=19) as check:
@@ -94,6 +97,31 @@ class DevelopmentLauncherTests(unittest.TestCase):
                     )
         application.assert_not_called()
         self.assertEqual(output.getvalue(), "Kukni 1.2.3-test\n")
+
+    def test_html_check_startup_failure_never_prints_raw_exception(self):
+        failing_module = types.SimpleNamespace(
+            main=mock.Mock(side_effect=RuntimeError("secret raw failure"))
+        )
+        output = io.StringIO()
+        with mock.patch.dict(sys.modules, {"kukni.ui_diagnostics": failing_module}):
+            with mock.patch("sys.stdout", new=output):
+                self.assertEqual(launcher._ui_diagnostics_main(), 1)
+        self.assertEqual(
+            output.getvalue(),
+            "HTML rendering self-test: Failed (startup)\n",
+        )
+        self.assertNotIn("secret", output.getvalue())
+
+    def test_html_check_has_its_own_explicit_ui_diagnostic_route(self):
+        with mock.patch.object(launcher, "_ui_diagnostics_main", return_value=23) as check:
+            with mock.patch.object(launcher, "_diagnostics_main") as headless:
+                with mock.patch.object(launcher, "_application_main") as application:
+                    self.assertEqual(
+                        launcher.main(["kukni", "--check-html"], environ={}), 23
+                    )
+        check.assert_called_once_with()
+        headless.assert_not_called()
+        application.assert_not_called()
 
     def test_packaged_version_is_not_mislabeled_as_checkout(self):
         with tempfile.TemporaryDirectory() as directory:

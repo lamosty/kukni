@@ -21,6 +21,7 @@ _USAGE = """\
 Usage: kukni [FILE]
        kukni --development [FILE]
        kukni --check
+       kukni --check-html
        kukni --version
 
 Preview FILE, or open an empty Kukni window when no file is supplied.
@@ -29,7 +30,9 @@ Options:
   --development  Run this source checkout without installing or registering it.
                  Development mode is isolated from the installed application
                  and never provides Nautilus previewer integration.
-  --check        Check this runtime and its required preview sandboxes.
+  --check        Check this runtime without requiring a display.
+  --check-html   Verify WebKit pixels; requires a display and briefly opens a
+                 window containing only the fixed synthetic test page.
   --version      Show the running checkout or installed package revision.
   -h, --help     Show this help.
 
@@ -111,6 +114,18 @@ def _diagnostics_main() -> int:
     return main()
 
 
+def _ui_diagnostics_main() -> int:
+    try:
+        from kukni.ui_diagnostics import main
+
+        return main()
+    except Exception:
+        # Diagnostics output is a fixed CI contract. Never expose raw WebKit,
+        # display, filesystem, or environment details from startup failures.
+        print("HTML rendering self-test: Failed (startup)")
+        return 1
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -125,6 +140,8 @@ def main(
         return 0
     if options == ["--check"]:
         return _diagnostics_main()
+    if options == ["--check-html"]:
+        return _ui_diagnostics_main()
     if options == ["--version"]:
         print("Kukni " + _checkout_version(PROJECT_ROOT))
         return 0

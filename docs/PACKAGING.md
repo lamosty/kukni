@@ -116,8 +116,12 @@ package and checksum are uploaded, never the checkout or test documents.
 private bus on an isolated display, checks the launched process path, and
 exercises ShowFile and Close. It does not use the user's activation overrides
 and does not infer pixel correctness from a visible window. The installed
-`/usr/bin/kukni --check` and real image UI tests provide the separate rendering
-requirements.
+`/usr/bin/kukni --check` and real image UI tests provide separate image/PDF
+rendering requirements. With WebKit installed, the same target also invokes
+`/usr/bin/kukni --check-html` on an isolated display with a hard timeout. This
+fixed synthetic page must produce the expected colored pixels through the
+actual packaged launcher, not merely a load-finished signal or a fallback.
+No arbitrary checkout script receives the package's AppArmor permission.
 
 The next public distribution milestone is a versioned GitHub Release download
 with reviewable release notes, followed by a signed APT channel. No release,
