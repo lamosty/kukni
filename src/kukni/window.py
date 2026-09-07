@@ -57,6 +57,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         renderer_registry: RendererRegistry | None = None,
         *,
         opening_timeout_seconds: int = OPENING_TIMEOUT_SECONDS,
+        development: bool = False,
     ) -> None:
         opening_timeout_seconds = int(opening_timeout_seconds)
         if opening_timeout_seconds <= 0:
@@ -89,6 +90,16 @@ class PreviewWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         header.set_decoration_layout(":close")
         header.set_title_widget(self._title)
+        # @constraint This persistent, human-facing marker is separate from
+        # the filename title/subtitle, which change throughout a preview.
+        self._development_badge = Gtk.Label(
+            label="Development",
+            visible=bool(development),
+            tooltip_text="Running directly from the source checkout",
+        )
+        self._development_badge.add_css_class("caption")
+        self._development_badge.add_css_class("accent")
+        header.pack_start(self._development_badge)
         self._navigation_buttons = (
             self._icon_button("go-previous-symbolic", "win.navigate-left", "Previous file (Left)"),
             self._icon_button("go-next-symbolic", "win.navigate-right", "Next file (Right)"),

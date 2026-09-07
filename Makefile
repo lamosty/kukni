@@ -1,4 +1,31 @@
-.PHONY: test test-python test-shell test-install test-ui test-corpus install uninstall
+.DEFAULT_GOAL := help
+
+.PHONY: help dev check package test test-python test-shell test-install test-ui test-corpus install uninstall
+
+# @security GNU Make normally exports command-line variables and expands their
+# contents while constructing a recipe environment. Keep raw FILE out of that
+# path, escape Make's `$` trigger plus `%`, and let the Python launcher decode
+# it without a shell. Quotes, spaces and Make/shell syntax remain literal.
+unexport FILE
+dev: export KUKNI_MAKE_DEVELOPMENT_FILE := $(subst $$,%24,$(subst %,%25,$(value FILE)))
+dev:
+	./bin/kukni --development
+
+help:
+	@printf '%s\n' \
+		'Kukni developer commands:' \
+		'  make dev                    Run this checkout without installing' \
+		'  make dev FILE=/path/image  Preview one file from this checkout' \
+		'  make check                  Check the installed Kukni runtime' \
+		'  make package                Build a traceable .deb in dist/' \
+		'  make test                   Run the headless test suites' \
+		'  make test-ui                Run isolated display/session UI smoke tests'
+
+check:
+	/usr/bin/kukni --check
+
+package:
+	python3 packaging/build-deb.py
 
 test: test-python test-shell test-install
 
@@ -12,6 +39,7 @@ test-install:
 	./tests/test_install.sh
 
 test-ui:
+	./tests/run-ui.sh python3 tests/smoke_development.py
 	./tests/run-ui.sh python3 tests/smoke_app.py
 	./tests/run-ui.sh python3 tests/smoke_renderer_contract.py
 	./tests/run-ui.sh python3 tests/smoke_images.py
