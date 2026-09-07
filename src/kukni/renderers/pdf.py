@@ -25,7 +25,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from ..worker import probe_bwrap_user_namespace, terminate_process_group
 from .base import ErrorCallback, ReadyCallback
-from .image_view import ImagePreviewView
+from .pdf_layout import PdfDocumentLayout
 
 
 PDF_CONTENT_TYPES = frozenset(
@@ -496,6 +496,14 @@ class _PdfPageLoader:
                 self._pending = None
             self._queue_delivery(generation, on_error, "The PDF preview worker could not start")
 
+    def cancel_pending(self) -> None:
+        """Invalidate obsolete page work without cancelling the document."""
+
+        with self._lock:
+            self._generation += 1
+            self._pending = None
+            self._delivery = None
+
     def _is_current(self, generation: int) -> bool:
         with self._lock:
             return generation == self._generation and not self.cancellable.is_cancelled()
@@ -563,8 +571,58 @@ class _PdfPageLoader:
         return GLib.SOURCE_REMOVE
 
 
-class PdfPreviewView(ImagePreviewView):
-    """The shared zoom/pan canvas with one lazy, bounded PDF page at a time."""
+class _PdfPageSlot(Gtk.Overlay):
+    """One cheap placeholder whose paintable may be dropped independently."""
+
+    def __init__(self, page: int) -> None:
+        super().__init__(halign=Gtk.Align.CENTER, overflow=Gtk.Overflow.HIDDEN)
+        self.page = page
+        self.add_css_class("pdf-canvas")
+        self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True)
+        self.picture.update_property(
+            [Gtk.AccessibleProperty.LABEL], [f"PDF page {page} preview"],
+        )
+        self.set_child(self.picture)
+        self.status = Gtk.Label(label=f"Page {page}", halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        self.status.add_css_class("caption")
+        self.add_overlay(self.status)
+
+    # @why Texture intrinsic sizes must not override document layout. This also
+    # keeps an unloaded placeholder allocation identical to its loaded page.
+    def do_measure(self, orientation, _for_size):
+        requested = self.get_size_request()
+        size = requested[0 if orientation == Gtk.Orientation.HORIZONTAL else 1]
+        size = max(1, size)
+        return size, size, -1, -1
+
+    def show_texture(self, texture: Gdk.Texture) -> None:
+        self.picture.set_paintable(texture)
+        self.status.set_visible(False)
+        self.status.set_tooltip_text(None)
+
+    def show_loading(self) -> None:
+        if self.picture.get_paintable() is None:
+            self.status.set_label(f"Loading page {self.page}…")
+            self.status.set_tooltip_text(None)
+            self.status.set_visible(True)
+
+    def show_error(self, message: str) -> None:
+        self.picture.set_paintable(None)
+        self.status.set_label(f"Page {self.page} preview unavailable")
+        self.status.set_tooltip_text(message)
+        self.status.set_visible(True)
+
+    def unload(self) -> None:
+        self.picture.set_paintable(None)
+        self.status.set_label(f"Page {self.page}")
+        self.status.set_tooltip_text(None)
+        self.status.set_visible(True)
+
+
+class PdfPreviewView(Gtk.Box):
+    """Width-fit, continuously scrollable PDF with a bounded lazy pixel cache."""
+
+    _MAX_RETAINED_TEXTURES = 5
 
     def __init__(
         self, texture: Gdk.Texture, page: PdfPage | None = None,
@@ -574,82 +632,400 @@ class PdfPreviewView(ImagePreviewView):
         if not (0 < width <= DEFAULT_LIMITS.max_edge_pixels
                 and 0 < height <= DEFAULT_LIMITS.max_edge_pixels):
             raise PdfPreviewError("The rendered PDF page has unsafe dimensions")
-        super().__init__(texture, width, height)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
         self.add_css_class("pdf-preview")
-        self.picture.add_css_class("pdf-page")
-        self.picture.update_property([Gtk.AccessibleProperty.LABEL], ["PDF page preview"])
         self._loader = loader
         self.page_number = page.page_number if page else 1
         self.requested_page = self.page_number
         self.page_count = page.page_count if page else 1
         self.total_pages = page.total_pages if page else 1
+        if not (1 <= self.page_number <= self.page_count <= DEFAULT_LIMITS.max_pages):
+            raise PdfPreviewError("The PDF page count exceeds the preview page limit")
         self.preview_geometry = ("pdf", width, height)
-        self.previous_button = Gtk.Button(icon_name="go-previous-symbolic", focus_on_click=False)
-        self.previous_button.add_css_class("flat")
-        self.previous_button.update_property([Gtk.AccessibleProperty.LABEL], ["Previous PDF page"])
-        self.previous_button.set_tooltip_text("Previous PDF page (Page Up)")
-        self.previous_button.connect("clicked", lambda *_: self.change_page(-1))
-        self.next_button = Gtk.Button(icon_name="go-next-symbolic", focus_on_click=False)
-        self.next_button.add_css_class("flat")
-        self.next_button.update_property([Gtk.AccessibleProperty.LABEL], ["Next PDF page"])
-        self.next_button.set_tooltip_text("Next PDF page (Page Down)")
-        self.next_button.connect("clicked", lambda *_: self.change_page(1))
+        self.texture = texture
+        self.source_width, self.source_height = width, height
+        self.zoom = 1.0
+        self.fit_mode = True
+        self._zoom_basis = "width"
+        self._layout = PdfDocumentLayout(
+            self.page_count, width, height, max_pages=DEFAULT_LIMITS.max_pages,
+        )
+        self._slots = [_PdfPageSlot(number) for number in range(1, self.page_count + 1)]
+        self._textures: dict[int, Gdk.Texture] = {self.page_number: texture}
+        self._errors: dict[int, str] = {}
+        self._loading_page: int | None = None
+        self._wanted_pages: tuple[int, ...] = ()
+        self._rects = ()
+        self._viewport_width = 0
+        self._layout_dirty = True
+        self._tick_id = 0
+        self._relayout_frames = 0
+        self._pending_anchor: tuple[int, float] | None = None
+        self._pending_horizontal_fraction: float | None = None
+        self._initial_top = True
+        self._pan_origin = (0.0, 0.0)
+        self._pan_active = False
+
+        self.canvas = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=self._layout.gap)
+        self.canvas.set_margin_top(self._layout.margin)
+        self.canvas.set_margin_bottom(self._layout.margin)
+        for slot in self._slots:
+            self.canvas.append(slot)
+        self._slots[self.page_number - 1].show_texture(texture)
+        self.picture = self._slots[self.page_number - 1].picture
+        self.scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True, focusable=False)
+        self.scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.scroller.set_child(self.canvas)
+        self.append(self.scroller)
+        self.scroller.get_vadjustment().connect("value-changed", self._on_scroll_position)
+        for adjustment in (self.scroller.get_hadjustment(), self.scroller.get_vadjustment()):
+            adjustment.connect("changed", lambda *_args: self._queue_layout())
+
+        # Only Ctrl-wheel is intercepted. Returning False for ordinary smooth
+        # and discrete input leaves GTK's native scroll/kinetic machinery intact.
+        scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        scroll.connect("scroll", self._on_scroll)
+        self.scroller.add_controller(scroll)
+        drag = Gtk.GestureDrag.new()
+        drag.set_button(1)
+        drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drag.connect("drag-begin", self._on_drag_begin)
+        drag.connect("drag-update", self._on_drag_update)
+        drag.connect("drag-end", self._on_drag_end)
+        self.scroller.add_controller(drag)
+        self.drag_gesture = drag
+
+        self.toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.toolbar.add_css_class("preview-controls")
+        self.toolbar.set_halign(Gtk.Align.CENTER)
+        self.toolbar.append(self._button("zoom-out-symbolic", "Zoom out (−)", self.zoom_out))
+        self.zoom_label = Gtk.Label(width_chars=5)
+        self.zoom_label.add_css_class("caption")
+        self.zoom_label.add_css_class("numeric")
+        self.toolbar.append(self.zoom_label)
+        self.toolbar.append(self._button("zoom-in-symbolic", "Zoom in (+)", self.zoom_in))
+        self.fit_button = Gtk.Button(label="Fit width", focus_on_click=False)
+        self.fit_button.add_css_class("flat")
+        self.fit_button.set_tooltip_text("Fit pages to window width (0)")
+        self.fit_button.connect("clicked", lambda *_args: self.fit())
+        self.toolbar.append(self.fit_button)
+        self.actual_button = Gtk.Button(label="1:1", focus_on_click=False)
+        self.actual_button.add_css_class("flat")
+        self.actual_button.set_tooltip_text("One retained preview pixel per logical display unit (1)")
+        self.actual_button.connect("clicked", lambda *_args: self.actual_size())
+        self.toolbar.append(self.actual_button)
+        self.previous_button = self._button(
+            "go-previous-symbolic", "Previous PDF page (Page Up)", lambda: self.change_page(-1),
+        )
+        self.next_button = self._button(
+            "go-next-symbolic", "Next PDF page (Page Down)", lambda: self.change_page(1),
+        )
         self.page_label = Gtk.Label()
         self.page_label.add_css_class("caption")
         self.toolbar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.toolbar.append(self.previous_button)
         self.toolbar.append(self.page_label)
         self.toolbar.append(self.next_button)
+        self.append(self.toolbar)
         self._update_page_controls()
+        self._update_zoom_controls()
+        self.connect("map", lambda *_args: self._queue_layout())
+
+    @property
+    def retained_texture_count(self) -> int:
+        return len(self._textures)
+
+    def fit(self) -> None:
+        self.fit_mode = True
+        self._zoom_basis = "width"
+        self.zoom = 1.0
+        self._begin_relayout()
+
+    def actual_size(self) -> None:
+        self.fit_mode = False
+        self._zoom_basis = "pixels"
+        self.zoom = 1.0
+        self._begin_relayout()
+
+    def zoom_in(self) -> None:
+        self._set_zoom(self.zoom * 1.25)
+
+    def zoom_out(self) -> None:
+        self._set_zoom(self.zoom / 1.25)
+
+    def _set_zoom(self, zoom: float) -> None:
+        self.fit_mode = False
+        self.zoom = max(0.05, min(8.0, zoom))
+        self._begin_relayout()
+
+    def _begin_relayout(self) -> None:
+        if self._rects:
+            adjustment = self.scroller.get_vadjustment()
+            self._pending_anchor = self._layout.capture_anchor(
+                self._rects, adjustment.get_value(),
+            )
+            horizontal = self.scroller.get_hadjustment()
+            self._pending_horizontal_fraction = (
+                horizontal.get_value() + horizontal.get_page_size() / 2
+            ) / max(1, horizontal.get_upper())
+        self._relayout_frames = 2
+        self._layout_dirty = True
+        self._update_zoom_controls()
+        self._queue_layout()
 
     def change_page(self, offset: int) -> None:
-        self.request_page(self.requested_page + offset)
+        self.request_page(self.page_number + offset)
 
     def request_page(self, page_number: int) -> None:
-        if (self._loader is None or self._loader.cancellable.is_cancelled()
-                or not 1 <= page_number <= self.page_count
-                or page_number == self.requested_page):
+        if type(page_number) is not int or not 1 <= page_number <= self.page_count:
+            return
+        if self._loader is not None and self._loader.cancellable.is_cancelled():
             return
         self.requested_page = page_number
-        self._update_page_controls(loading=True)
-        self._loader.request(page_number, self._show_page, self._page_error)
+        self._errors.pop(page_number, None)
+        # An explicit page command wins over an older lazy-resize anchor.
+        self._pending_anchor = None
+        self._initial_top = False
+        if self._rects:
+            adjustment = self.scroller.get_vadjustment()
+            adjustment.set_value(self._rects[page_number - 1].y - self._layout.margin)
+        self.page_number = page_number
+        self._set_current_page_properties()
+        self._refresh_visible_pages(force_page=page_number)
+
+    def _on_scroll_position(self, _adjustment) -> None:
+        if not self._pending_anchor:
+            self._refresh_visible_pages()
+        self._queue_layout()
+
+    def _on_scroll(self, controller, _dx, dy) -> bool:
+        if not controller.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
+            return False
+        if dy < 0:
+            self.zoom_in()
+        elif dy > 0:
+            self.zoom_out()
+        return True
+
+    def pan_to(self, x: float, y: float) -> None:
+        self._pending_anchor = None
+        self.scroller.get_hadjustment().set_value(x)
+        self.scroller.get_vadjustment().set_value(y)
+
+    def _on_drag_begin(self, gesture, _x, _y) -> None:
+        adjustments = (self.scroller.get_hadjustment(), self.scroller.get_vadjustment())
+        self._pan_active = any(
+            adjustment.get_upper() > adjustment.get_page_size()
+            for adjustment in adjustments
+        )
+        if self._pan_active:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            self._pan_origin = tuple(adjustment.get_value() for adjustment in adjustments)
+            self.scroller.set_cursor_from_name("grabbing")
+
+    def _on_drag_update(self, _gesture, dx, dy) -> None:
+        if self._pan_active:
+            self.pan_to(self._pan_origin[0] - dx, self._pan_origin[1] - dy)
+
+    def _on_drag_end(self, _gesture, _dx, _dy) -> None:
+        self._pan_active = False
+        self.scroller.set_cursor_from_name("default" if self.fit_mode else "grab")
+
+    def _queue_layout(self) -> None:
+        if not self._tick_id:
+            self._tick_id = self.add_tick_callback(self._on_tick)
+
+    def _on_tick(self, _widget, _clock) -> bool:
+        horizontal = self.scroller.get_hadjustment()
+        viewport_width = round(horizontal.get_page_size())
+        if viewport_width <= 1:
+            viewport_width = self.scroller.get_width()
+        viewport_width = max(1, viewport_width)
+        needs_layout = self._layout_dirty or viewport_width != self._viewport_width or not self._rects
+        if needs_layout:
+            if self._rects and self._pending_anchor is None and not self._initial_top:
+                self._pending_anchor = self._layout.capture_anchor(
+                    self._rects, self.scroller.get_vadjustment().get_value(),
+                )
+            self._viewport_width = viewport_width
+            self._layout_dirty = False
+            self._rects = self._layout.rects(
+                viewport_width, basis=self._zoom_basis, zoom=self.zoom,
+            )
+            for slot, rect in zip(self._slots, self._rects):
+                slot.set_size_request(rect.width, rect.height)
+            self._relayout_frames = max(self._relayout_frames, 2)
+        if self._relayout_frames:
+            self._relayout_frames -= 1
+            return True
+        vertical = self.scroller.get_vadjustment()
+        if self._initial_top:
+            vertical.set_value(0)
+            self._initial_top = False
+        elif self._pending_anchor is not None:
+            vertical.set_value(self._layout.restore_anchor(self._rects, self._pending_anchor))
+        self._pending_anchor = None
+        if self._pending_horizontal_fraction is not None:
+            horizontal = self.scroller.get_hadjustment()
+            horizontal.set_value(
+                self._pending_horizontal_fraction * horizontal.get_upper()
+                - horizontal.get_page_size() / 2
+            )
+            self._pending_horizontal_fraction = None
+        self._refresh_visible_pages()
+        self._tick_id = 0
+        return False
+
+    def _refresh_visible_pages(self, *, force_page: int | None = None) -> None:
+        if not self._rects:
+            self._queue_layout()
+            return
+        vertical = self.scroller.get_vadjustment()
+        wanted = list(self._layout.visible_pages(
+            self._rects, vertical.get_value(), max(1, vertical.get_page_size()), adjacent=1,
+        ))
+        if force_page is not None:
+            wanted = [force_page, *(item for item in wanted if item != force_page)]
+        self._wanted_pages = tuple(wanted[:self._MAX_RETAINED_TEXTURES])
+        if force_page is None:
+            self.page_number = self._layout.page_at_viewport_center(
+                self._rects, vertical.get_value(), max(1, vertical.get_page_size()),
+            )
+            self.requested_page = self.page_number
+        self._set_current_page_properties()
+        self._evict_distant_textures()
+        self._request_next_page()
+
+    def _request_next_page(self) -> None:
+        if self._loader is None or self._loader.cancellable.is_cancelled():
+            return
+        candidates = [
+            page for page in self._wanted_pages
+            if page not in self._textures and page not in self._errors
+        ]
+        if self._loading_page is not None and self._loading_page not in self._wanted_pages:
+            obsolete = self._loading_page
+            self._loading_page = None
+            if obsolete not in self._textures and obsolete not in self._errors:
+                self._slots[obsolete - 1].unload()
+            if not candidates:
+                self._loader.cancel_pending()
+                self._update_page_controls()
+                return
+        if not candidates:
+            return
+        if self._loading_page in self._wanted_pages:
+            return
+        target = candidates[0]
+        self._loading_page = target
+        self._slots[target - 1].show_loading()
+        self._update_page_controls()
+        self._loader.request(
+            target,
+            self._show_page,
+            lambda message, requested=target: self._page_error(requested, message),
+        )
 
     def _show_page(self, page: PdfPage) -> None:
         try:
-            _validate_png_dimensions(page.png, DEFAULT_LIMITS.max_edge_pixels)
+            width, height = _validate_png_dimensions(page.png, DEFAULT_LIMITS.max_edge_pixels)
             texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(page.png))
         except (GLib.Error, PdfPreviewError):
-            self._page_error("The rendered PDF page could not be displayed")
+            self._page_error(page.page_number, "The rendered PDF page could not be displayed")
             return
-        self.set_texture(texture, texture.get_width(), texture.get_height())
-        self.preview_geometry = ("pdf", texture.get_width(), texture.get_height())
-        self.page_number = page.page_number
-        self.requested_page = page.page_number
-        self.page_count = page.page_count
+        if not 1 <= page.page_number <= self.page_count:
+            return
+        anchor = self._layout.capture_anchor(
+            self._rects, self.scroller.get_vadjustment().get_value(),
+        ) if self._rects else None
+        self._layout.set_dimensions(page.page_number, width, height)
+        self._textures[page.page_number] = texture
+        self._slots[page.page_number - 1].show_texture(texture)
+        self._errors.pop(page.page_number, None)
+        self._loading_page = None
         self.total_pages = page.total_pages
+        if anchor is not None:
+            self._pending_anchor = anchor
+        self._relayout_frames = 2
+        self._rects = self._layout.rects(
+            max(1, round(self.scroller.get_hadjustment().get_page_size())),
+            basis=self._zoom_basis, zoom=self.zoom,
+        )
+        for slot, rect in zip(self._slots, self._rects):
+            slot.set_size_request(rect.width, rect.height)
+        self._evict_distant_textures()
+        self._set_current_page_properties()
+        self._update_page_controls()
+        self._queue_layout()
+
+    def _page_error(self, page: int, message: str) -> None:
+        if not 1 <= page <= self.page_count:
+            return
+        if self._loading_page == page:
+            self._loading_page = None
+        self._errors[page] = message
+        self._slots[page - 1].show_error(message)
+        self._update_page_controls()
+        self._request_next_page()
+
+    def _evict_distant_textures(self) -> None:
+        keep = set(self._wanted_pages)
+        keep.add(self.page_number)
+        while len(self._textures) > self._MAX_RETAINED_TEXTURES:
+            victim = max(
+                (page for page in self._textures if page not in keep),
+                key=lambda page: abs(page - self.page_number),
+                default=max(self._textures, key=lambda page: abs(page - self.page_number)),
+            )
+            del self._textures[victim]
+            self._slots[victim - 1].unload()
+
+    def _set_current_page_properties(self) -> None:
+        slot = self._slots[self.page_number - 1]
+        self.picture = slot.picture
+        texture = self._textures.get(self.page_number)
+        if texture is not None:
+            self.texture = texture
+            self.source_width, self.source_height = self._layout.dimensions(self.page_number)
+        elif hasattr(self, "texture"):
+            # The compatibility property must not pin an otherwise-evicted
+            # off-screen texture outside the explicit cache bound.
+            del self.texture
         self._update_page_controls()
 
-    def _page_error(self, message: str) -> None:
-        # A failed later page must not replace the successful document view or
-        # invoke the once-only renderer callback. Retain the previous page.
-        self.requested_page = self.page_number
-        self._update_page_controls()
-        self.page_label.set_label(f"Page {self.page_number} · preview unavailable")
-        self.page_label.set_tooltip_text(message)
-
-    def _update_page_controls(self, *, loading: bool = False) -> None:
-        shown = self.requested_page if loading else self.page_number
-        text = f"Page {shown} of {self.page_count}"
-        detail = f"Page {shown} of {self.total_pages}"
+    def _update_page_controls(self) -> None:
+        text = f"Page {self.page_number} of {self.page_count}"
+        detail = f"Page {self.page_number} of {self.total_pages}"
         if self.total_pages > self.page_count:
             text += " · limited"
             detail += f"; preview is limited to the first {self.page_count} pages"
-        if loading:
-            text = f"Loading page {shown}…"
+        if self.page_number in self._errors:
+            text += " · preview unavailable"
+            detail = self._errors[self.page_number]
+        elif self._loading_page == self.page_number:
+            text = f"Loading page {self.page_number}…"
         self.page_label.set_label(text)
         self.page_label.set_tooltip_text(detail)
-        self.previous_button.set_sensitive(self._loader is not None and shown > 1)
-        self.next_button.set_sensitive(self._loader is not None and shown < self.page_count)
+        available = self._loader is not None and not self._loader.cancellable.is_cancelled()
+        self.previous_button.set_sensitive(available and self.page_number > 1)
+        self.next_button.set_sensitive(available and self.page_number < self.page_count)
+
+    def _update_zoom_controls(self) -> None:
+        self.zoom_label.set_label(f"{round(self.zoom * 100)}%")
+        basis = "page width" if self._zoom_basis == "width" else "retained preview pixels"
+        self.zoom_label.set_tooltip_text(f"Scale relative to {basis}")
+        self.fit_button.set_sensitive(not self.fit_mode)
+        self.scroller.set_cursor_from_name("default" if self.fit_mode else "grab")
+
+    @staticmethod
+    def _button(icon: str, tooltip: str, callback) -> Gtk.Button:
+        button = Gtk.Button(icon_name=icon, focus_on_click=False)
+        button.add_css_class("flat")
+        button.set_tooltip_text(tooltip)
+        button.update_property([Gtk.AccessibleProperty.LABEL], [tooltip])
+        button.connect("clicked", lambda *_args: callback())
+        return button
 
 
 class PdfRenderer:

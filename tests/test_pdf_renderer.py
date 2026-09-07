@@ -35,6 +35,7 @@ from kukni.renderers.pdf import (
     render_pdf_first_page,
     supports_pdf,
 )
+from kukni.renderers.pdf_layout import MAX_PAGE_LAYOUT_EDGE, PdfDocumentLayout
 
 
 def build_minimal_pdf(pages: int = 1) -> bytes:
@@ -418,6 +419,25 @@ class PdfPageLoaderTests(unittest.TestCase):
         self.assertEqual(self.pages, [])
         self.assertEqual(self.errors, [])
 
+    def test_obsolete_work_can_be_cancelled_without_cancelling_document(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def render(_path, page, *, cancelled, limits):
+            entered.set()
+            self.assertTrue(release.wait(2))
+            self.assertTrue(cancelled())
+            raise PdfPreviewCancelled()
+
+        with mock.patch("kukni.renderers.pdf.render_pdf_page", side_effect=render):
+            self.loader.request(1, self.pages.append, self.errors.append)
+            self.assertTrue(entered.wait(2))
+            self.loader.cancel_pending()
+            self.assertFalse(self.cancellable.is_cancelled())
+            release.set()
+            self.drain()
+        self.assertEqual(self.pages, [])
+        self.assertEqual(self.errors, [])
+
     def test_failure_delivers_one_error(self):
         with mock.patch("kukni.renderers.pdf.render_pdf_page", side_effect=PdfPreviewError("document rejected")):
             self.loader.request(1, self.pages.append, self.errors.append)
@@ -530,6 +550,67 @@ class PdfLimitTests(unittest.TestCase):
         argument_triples = tuple(zip(command, command[1:], command[2:]))
         self.assertNotIn(("--ro-bind", "/", "/"), argument_triples)
         self.assertIn("/tmp/kukni-output", command)
+
+
+class PdfDocumentLayoutTests(unittest.TestCase):
+    def test_width_fit_is_continuous_and_handles_mixed_page_dimensions(self):
+        layout = PdfDocumentLayout(3, 600, 900, max_pages=500)
+        layout.set_dimensions(2, 900, 600)
+        rects = layout.rects(1000)
+        self.assertEqual([rect.width for rect in rects], [968, 968, 968])
+        self.assertGreater(rects[0].height, rects[1].height)
+        self.assertEqual(rects[1].y, rects[0].y + rects[0].height + layout.gap)
+        self.assertEqual(rects[2].y, rects[1].y + rects[1].height + layout.gap)
+
+    def test_visible_pages_are_bounded_to_visible_and_adjacent(self):
+        layout = PdfDocumentLayout(500, 600, 900, max_pages=500)
+        rects = layout.rects(1000)
+        wanted = layout.visible_pages(rects, rects[249].y, 800, adjacent=1)
+        self.assertLessEqual(len(wanted), 4)
+        self.assertIn(250, wanted)
+        self.assertTrue(all(249 <= page <= 252 for page in wanted))
+
+    def test_extreme_tall_page_owns_points_inside_it_not_nearer_page_centers(self):
+        layout = PdfDocumentLayout(3, 100, 2_000, max_pages=500)
+        layout.set_dimensions(2, 1_000, 100)
+        rects = layout.rects(1_000)
+        scroll = rects[0].y + rects[0].height - 900
+        self.assertEqual(layout.page_at_viewport_center(rects, scroll, 800), 1)
+
+    def test_visible_tall_page_is_prioritized_before_adjacent_prefetch(self):
+        layout = PdfDocumentLayout(3, 100, 2_000, max_pages=500)
+        layout.set_dimensions(2, 1_000, 100)
+        rects = layout.rects(1_000)
+        scroll = rects[0].y + rects[0].height - 500
+        wanted = layout.visible_pages(rects, scroll, 300, adjacent=1)
+        self.assertEqual(wanted[0], 1)
+        self.assertIn(2, wanted)
+
+    def test_anchor_survives_placeholder_aspect_ratio_change(self):
+        layout = PdfDocumentLayout(5, 600, 900, max_pages=500)
+        before = layout.rects(1000)
+        scroll = before[3].y + before[3].height * .4
+        anchor = layout.capture_anchor(before, scroll)
+        layout.set_dimensions(2, 900, 600)
+        after = layout.rects(1000)
+        restored = layout.restore_anchor(after, anchor)
+        self.assertEqual(anchor[0], 4)
+        self.assertAlmostEqual(
+            (restored - after[3].y) / after[3].height, .4, places=5,
+        )
+
+    def test_rejects_more_than_the_placeholder_limit(self):
+        with self.assertRaisesRegex(ValueError, "placeholder limit"):
+            PdfDocumentLayout(501, 600, 900, max_pages=500)
+
+    def test_extreme_zoomed_placeholders_stay_inside_native_layout_coordinates(self):
+        layout = PdfDocumentLayout(500, 1, 1_800, max_pages=500)
+        rects = layout.rects(1_800, zoom=8.0)
+        self.assertEqual(len(rects), 500)
+        self.assertTrue(
+            all(max(rect.width, rect.height) <= MAX_PAGE_LAYOUT_EDGE for rect in rects)
+        )
+        self.assertLess(rects[-1].y + rects[-1].height + layout.margin, 2**31 - 1)
 
 
 if __name__ == "__main__":

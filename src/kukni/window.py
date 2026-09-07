@@ -20,6 +20,7 @@ except (ImportError, ValueError):  # pragma: no cover - backend dependent
 from .geometry import AdaptiveSizing, Size, preferred_window_size
 from .renderers.fallback import FallbackView
 from .renderers.image_view import ImagePreviewView
+from .renderers.pdf import PdfPreviewView
 from .renderers.registry import RendererRegistry, default_registry
 from .renderers.text import TextPreviewView, sanitize_display_label
 from .session import Direction, PreviewSession, PreviewState, PreviewToken
@@ -236,7 +237,9 @@ class PreviewWindow(Adw.ApplicationWindow):
 
     def _image_action(self, method: str, *args) -> None:
         widget = self._stack.get_visible_child()
-        if isinstance(widget, ImagePreviewView) and callable(getattr(widget, method, None)):
+        # @decision Documents share zoom actions, not a one-image layout.
+        # Keep PDF's native scrolling independent of the photograph canvas.
+        if isinstance(widget, (ImagePreviewView, PdfPreviewView)) and callable(getattr(widget, method, None)):
             getattr(widget, method)(*args)
 
     def _toggle_info(self) -> None:
@@ -453,7 +456,7 @@ class PreviewWindow(Adw.ApplicationWindow):
         self._preview_detail = safe_subtitle
         self._update_info(widget)
         self._replace_content(widget, "content")
-        self._set_zoom_available(isinstance(widget, ImagePreviewView))
+        self._set_zoom_available(isinstance(widget, (ImagePreviewView, PdfPreviewView)))
         self._schedule_content_size(widget, info)
 
     def _on_renderer_error(
