@@ -3,14 +3,24 @@
 
 """Headless, bounded installation checks; never inspect the user's documents."""
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import posixpath
+import re
 import struct
+import subprocess
 import tempfile
 import zlib
 
 
 SYSTEM_ROOT = Path('/usr/lib/kukni')
+SYSTEM_DATA_ROOT = Path('/usr/share')
+DBUS_NAMES = ('io.github.lamosty.Kukni', 'org.gnome.NautilusPreviewer')
+DBUS_DAEMON = 'org.freedesktop.DBus'
+DBUS_PATH = '/org/freedesktop/DBus'
+DBUS_TIMEOUT_SECONDS = 2
 
 
 @dataclass(frozen=True)
@@ -24,39 +34,264 @@ class Check:
 
 def system_integration_check(
     *, project_root: Path | None = None, home: Path | None = None,
-) -> Check | None:
-    """Warn when a packaged executable is hidden by a per-user preview.
+    environ: Mapping[str, str] | None = None,
+) -> Check:
+    """Fail when packaged activation is hidden by earlier XDG entries.
 
     Presence is enough to diagnose D-Bus/desktop precedence. Deliberately do
-    not read, resolve, or print any user-owned file or environment value.
+    not read, resolve, or print any user-owned file or environment value. XDG
+    ignores relative data paths, so diagnostics do too.
     """
 
     if project_root is None:
         project_root = Path(__file__).resolve().parents[2]
     if project_root != SYSTEM_ROOT:
-        return None
+        return Check(
+            'Installed activation', True,
+            'Source-checkout runtime only; installed desktop and D-Bus activation '
+            'were not inspected.',
+            required=False, kind='source',
+        )
     if home is None:
         home = Path.home()
-    local = home / '.local'
-    overrides = (
-        local / 'bin/kukni',
-        local / 'share/applications/io.github.lamosty.Kukni.desktop',
-        local / 'share/dbus-1/services/io.github.lamosty.Kukni.service',
-        local / 'share/dbus-1/services/org.gnome.NautilusPreviewer.service',
-    )
-    shadowed = any(path.exists() or path.is_symlink() for path in overrides)
-    if shadowed:
+    if environ is None:
+        environ = os.environ
+
+    data_home_value = environ.get('XDG_DATA_HOME', '')
+    data_home = Path(data_home_value) if data_home_value and Path(data_home_value).is_absolute() \
+        else home / '.local/share'
+    data_dirs_value = environ.get('XDG_DATA_DIRS', '')
+    if data_dirs_value:
+        data_dirs = tuple(
+            Path(value) for value in data_dirs_value.split(':')
+            if value and Path(value).is_absolute()
+        )
+    else:
+        data_dirs = (Path('/usr/local/share'), SYSTEM_DATA_ROOT)
+
+    desktop_roots = (data_home, *data_dirs)
+    try:
+        desktop_system_position = desktop_roots.index(SYSTEM_DATA_ROOT)
+    except ValueError:
         return Check(
-            'System integration', False,
-            'A per-user Kukni preview install may take precedence. Close the preview '
-            'and run its user-owned uninstaller as your normal user; never remove '
-            'home-directory files as root.',
-            required=False, kind='warning',
+            'Installed activation', False,
+            'The active XDG data search configuration excludes the packaged '
+            'desktop entry.',
+            kind='warning',
+        )
+
+    runtime_value = environ.get('XDG_RUNTIME_DIR', '')
+    runtime_root = Path(runtime_value) if runtime_value and Path(runtime_value).is_absolute() \
+        else None
+    # @constraint dbus-daemon searches the runtime directory first, followed by
+    # XDG data directories, then its compiled data directory (normally
+    # /usr/share) even if XDG_DATA_DIRS omitted it. Desktop lookup has no such
+    # final fallback.
+    service_roots = tuple(
+        root for root in (runtime_root, data_home, *data_dirs, SYSTEM_DATA_ROOT)
+        if root is not None
+    )
+    service_system_position = service_roots.index(SYSTEM_DATA_ROOT)
+    service_metadata = (
+        Path('dbus-1/services/io.github.lamosty.Kukni.service'),
+        Path('dbus-1/services/org.gnome.NautilusPreviewer.service'),
+    )
+    desktop = Path('applications/io.github.lamosty.Kukni.desktop')
+    shadowed_desktop = any(
+        (root / desktop).exists() or (root / desktop).is_symlink()
+        for root in desktop_roots[:desktop_system_position]
+    )
+    shadowed_service = any(
+        (root / relative).exists() or (root / relative).is_symlink()
+        for root in service_roots[:service_system_position] for relative in service_metadata
+    )
+    local_launcher = home / '.local/bin/kukni'
+    shadowed_launcher = local_launcher.exists() or local_launcher.is_symlink()
+    if shadowed_launcher or shadowed_desktop or shadowed_service:
+        return Check(
+            'Installed activation', False,
+            'A launcher, desktop entry, or D-Bus service earlier in the user search '
+            'order may override the packaged Kukni install. If it belongs to the old '
+            'per-user Kukni installation, close it and run its user-owned uninstaller '
+            'as your normal user; otherwise review the conflicting registration. '
+            'Never remove home-directory files as root.',
+            kind='warning',
         )
     return Check(
-        'System integration', True,
-        'No default per-user Kukni launcher or activation override was found.',
-        required=False, kind='inspection',
+        'Installed activation', True,
+        'No earlier launcher, desktop entry, or D-Bus service shadows the packaged install.',
+        kind='inspection',
+    )
+
+
+class _BusUnavailable(Exception):
+    pass
+
+
+class _OwnerUnverifiable(Exception):
+    pass
+
+
+def _gdbus_call(method: str, name: str) -> str:
+    """Call only the D-Bus daemon, with a hard deadline and private output."""
+
+    address = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
+    if not address or any(
+        entry.startswith('autolaunch:') for entry in address.split(';')
+    ):
+        # `gdbus --session` may auto-launch a bus when DISPLAY is available.
+        # An explicit address can also contain an autolaunch transport, including
+        # as a fallback after another address. Diagnostics must never use either.
+        raise _BusUnavailable
+    command = [
+        '/usr/bin/gdbus', 'call', '--address', address, '--dest', DBUS_DAEMON,
+        '--object-path', DBUS_PATH, '--method', f'{DBUS_DAEMON}.{method}', name,
+    ]
+    try:
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=DBUS_TIMEOUT_SECONDS, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise _BusUnavailable from error
+    if result.returncode != 0:
+        raise _BusUnavailable
+    return result.stdout.strip()
+
+
+def _session_name_pid(name: str) -> int | None:
+    # @security NameHasOwner and GetConnectionUnixProcessID are daemon methods;
+    # unlike StartServiceByName or an application method, neither activates or
+    # closes an application. Captured daemon output is parsed but never printed.
+    has_owner = _gdbus_call('NameHasOwner', name)
+    if has_owner == '(false,)':
+        return None
+    if has_owner != '(true,)':
+        raise _BusUnavailable
+    try:
+        reply = _gdbus_call('GetConnectionUnixProcessID', name)
+    except _BusUnavailable as error:
+        # The owner may have exited between the bounded daemon calls. We know an
+        # owner existed but cannot make an origin claim about it.
+        raise _OwnerUnverifiable from error
+    match = re.fullmatch(r'\(uint32 ([1-9][0-9]*),\)', reply)
+    if match is None:
+        raise _OwnerUnverifiable
+    return int(match.group(1))
+
+
+def _installed_origin_for_pid(pid: int, *, proc_root: Path = Path('/proc')) -> bool | None:
+    """Return installed/wrong/unknown launch path without disclosing argv."""
+
+    try:
+        with (proc_root / str(pid) / 'cmdline').open('rb') as command_line:
+            private_command = command_line.read(131073)
+    except OSError:
+        return None
+    if len(private_command) > 131072:
+        return None
+    arguments = private_command.rstrip(b'\0').split(b'\0')
+    if not arguments or not posixpath.basename(arguments[0]).startswith(b'python3'):
+        return None
+
+    script = None
+    options_ended = False
+    for argument in arguments[1:]:
+        if argument == b'--' and not options_ended:
+            options_ended = True
+            continue
+        if not options_ended and argument in (b'-I', b'-B', b'-IB', b'-BI'):
+            continue
+        if not options_ended and (
+            argument in (b'-c', b'-m') or argument.startswith((b'-c', b'-m'))
+        ):
+            return None
+        if not options_ended and argument.startswith(b'-'):
+            return None
+        script = argument
+        break
+    if script is None or not script.startswith(b'/'):
+        return None
+
+    installed_script = os.fsencode(SYSTEM_ROOT / 'bin/kukni')
+    normalized_script = posixpath.normpath(script)
+    if normalized_script == installed_script:
+        return True
+    # Both the old per-user installer and source checkout execute a bin/kukni
+    # script through Python. Inspect only the interpreter's launch-script slot,
+    # never later file arguments that Kukni was asked to preview.
+    if normalized_script.endswith(b'/bin/kukni'):
+        return False
+    return None
+
+
+def running_owner_check(
+    *, project_root: Path | None = None,
+    owner_pid: Callable[[str], int | None] = _session_name_pid,
+    proc_root: Path = Path('/proc'),
+) -> Check:
+    """Inspect an already-running owner without activating Kukni."""
+
+    if project_root is None:
+        project_root = Path(__file__).resolve().parents[2]
+    if project_root != SYSTEM_ROOT:
+        return Check(
+            'Running activation owner', True,
+            'Source-checkout runtime only; no installed process-origin claim was made.',
+            required=False, kind='source',
+        )
+
+    pids: set[int] = set()
+    try:
+        for name in DBUS_NAMES:
+            pid = owner_pid(name)
+            if pid is not None:
+                pids.add(pid)
+    except _BusUnavailable:
+        if pids:
+            return Check(
+                'Running activation owner', False,
+                'A running owner was found, but the complete D-Bus owner check became unavailable.',
+                kind='warning',
+            )
+        return Check(
+            'Running activation owner', True,
+            'The session D-Bus is unavailable; no running owner origin was checked.',
+            kind='unavailable',
+        )
+    except _OwnerUnverifiable:
+        return Check(
+            'Running activation owner', False,
+            'A running Kukni activation owner exists, but its process origin could not be verified.',
+            kind='warning',
+        )
+
+    if not pids:
+        return Check(
+            'Running activation owner', True,
+            'Neither Kukni D-Bus name currently has a running owner.',
+            kind='not-running',
+        )
+    origins = [_installed_origin_for_pid(pid, proc_root=proc_root) for pid in pids]
+    if any(origin is False for origin in origins):
+        return Check(
+            'Running activation owner', False,
+            'A running Kukni D-Bus owner was launched from a path other than the packaged install. '
+            'Close it before testing installed activation.',
+            kind='warning',
+        )
+    if any(origin is None for origin in origins):
+        return Check(
+            'Running activation owner', False,
+            'A running Kukni D-Bus owner exists, but its process origin could not be verified.',
+            kind='warning',
+        )
+    return Check(
+        'Running activation owner', True,
+        'Every running Kukni D-Bus owner was launched from the packaged path. '
+        'If the package was updated while Kukni was running, close it before '
+        'testing activation.',
+        kind='inspection',
     )
 
 
@@ -145,9 +380,8 @@ def check_runtime() -> list[Check]:
             'Prerequisite check only; the optional engine or its required sandbox is unavailable.',
             required=False, kind='prerequisite',
         ))
-    integration = system_integration_check()
-    if integration is not None:
-        checks.append(integration)
+    checks.append(system_integration_check())
+    checks.append(running_owner_check())
     return checks
 
 
@@ -158,10 +392,18 @@ def main() -> int:
         print('Kukni is missing its core GTK/Python runtime dependencies.')
         return 1
     for check in checks:
-        if check.kind == 'warning':
+        if check.required and not check.ready:
+            state = 'Failed'
+        elif check.kind == 'warning':
             state = 'Warning'
         elif check.kind == 'prerequisite':
             state = 'Available' if check.ready else 'Unavailable'
+        elif check.kind == 'unavailable':
+            state = 'Unavailable'
+        elif check.kind == 'not-running':
+            state = 'Not running'
+        elif check.kind == 'source':
+            state = 'Source only'
         elif check.kind == 'self-test':
             state = 'Passed' if check.ready else 'Failed'
         else:
