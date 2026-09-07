@@ -92,8 +92,9 @@ plugin integration ships with Kukni.
 
 ## Installation boundary
 
-The source installer is designed for an unprivileged user prefix. Do not run it
-with `sudo`. It uses a manifest to avoid overwriting or removing unexpected
+The deprecated source copier requires explicit `--legacy-user-install` and is
+designed for an unprivileged user prefix. Do not run it with `sudo`. It uses a
+manifest to avoid overwriting or removing unexpected
 files. A source installation cannot add the narrowly scoped system AppArmor
 profile that some sandboxed renderers may require on Ubuntu; those renderers
 must remain unavailable rather than bypass policy.
@@ -104,3 +105,11 @@ That compatibility profile is not itself filesystem/network confinement and
 does not turn raster/CR2 workers into namespace sandboxes. No global namespace
 restriction is disabled. Installed-package CI and `kukni --check` require real
 core image/PDF output instead of interpreting fallback as renderer success.
+
+Development runs from the checkout with a distinct, non-unique application
+identity and never registers Nautilus's preview service. It does not inherit or
+borrow the fixed packaged launcher's namespace permission. Installation checks
+inspect activation precedence and already-running owners without starting or
+stopping desktop applications; they print no environment values, private
+service contents, document data, or process command lines. A matching process
+launch path is not proof that an already-running app reloaded an upgrade.

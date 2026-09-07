@@ -29,14 +29,31 @@ Nautilus Space key                         `kukni FILE`
 
 Kukni owns the user-session previewer D-Bus name and implements both the legacy
 and current Nautilus method shapes needed by the present compatibility target.
-The normal installer creates a user-level activation file, so Nautilus can start
-Kukni on demand. GNOME Sushi is not involved and is not a runtime dependency.
+The Ubuntu package owns the system activation files, so Nautilus can start
+Kukni on demand. Old per-user files override these and must be removed during
+migration; the package never deletes home-directory files. GNOME Sushi is not involved and is not a runtime dependency.
 
 Nautilus remains responsible for folder selection. When an arrow key is pressed,
 Kukni emits a `SelectionEvent`; Nautilus selects the adjacent item and answers
 with another `ShowFile` call. Kukni updates its current URI only after that call,
 keeping the same top-level window alive through rich previews, fallbacks, and
 errors.
+
+## Installed versus development identity
+
+The installed application uses `io.github.lamosty.Kukni` and owns the Nautilus
+preview contract. `make dev` runs current source with the separate
+`io.github.lamosty.Kukni.Devel` identity and non-unique application semantics:
+each invocation stays in its own process even if the installed app is running.
+It never registers `org.gnome.NautilusPreviewer` or writes activation metadata.
+The visible development label prevents confusing source UI with an installed
+release. Renderer limits and sandbox gating are identical; namespace permission
+belongs to the fixed packaged launcher, not to arbitrary checkout code.
+
+Headless runtime self-tests and desktop routing checks are distinct. A packaged
+check must not pass just because its own decoder works while D-Bus launches a
+legacy copy. Inspecting a current owner also does not prove future activation or
+Nautilus keyboard behavior; installed UI acceptance remains a separate gate.
 
 ## Session model
 
@@ -126,7 +143,7 @@ navigation continuous even before a dedicated renderer exists for a format.
 
 Ubuntu's AppArmor policy can deny unprivileged user namespaces to an unconfined
 source installation. That means bubblewrap-backed PDF and HTML rendering may
-correctly remain unavailable even when their packages are installed. A future
+correctly remain unavailable even when their packages are installed. The current
 `.deb` includes an app-scoped namespace-eligibility profile attached to its
 root-owned launcher; the source installer does not alter system policy. That
 compatibility profile is not itself a decoder sandbox: Bubblewrap/WebKit must

@@ -1,14 +1,14 @@
 # Packaging
 
 Kukni does not have a published package repository yet. For a complete Ubuntu
-runtime, the repository can build an inspectable local alpha `.deb` with its
-required dependency and namespace setup. The per-user `install.sh` remains a
-development option with limited PDF/HTML capability. Neither path implies a
-public package repository or signed release artifact is already available.
+runtime, use the tested alpha `.deb` with its required dependencies and namespace
+setup. Main-branch CI retains the exact successfully tested package and checksum
+for 30 days; it does not publish a stable or signed release. Development runs
+directly from the checkout with `make dev`, never by copying an installation.
 
-## Current per-user layout
+## Legacy per-user layout (migration only)
 
-With the defaults, `./install.sh` writes only below the current user's home:
+The old source copier used this layout below the current user's home:
 
 ```text
 ~/.local/bin/kukni
@@ -29,21 +29,26 @@ session-bus activation configuration on a best-effort basis. The uninstaller
 removes only manifest-owned files that still match their recorded state unless
 the user explicitly chooses `--force` after review.
 
-This layout makes a source checkout usable, but it is not a substitute for a
-versioned distro package: it does not resolve dependencies, provide automatic
-updates, or install a system AppArmor profile.
+This layout is now deprecated: its activation files can hide a newer system
+package indefinitely. Plain `./install.sh` refuses to create it. The tested
+implementation is retained behind explicit `--legacy-user-install` for legacy
+compatibility only, not recommended development. `./uninstall.sh --dry-run`
+performs the same ownership preflight as removal but changes no installed files.
+Neither the copier nor development mode installs system AppArmor policy.
 
 ## Local Ubuntu alpha package
 
-`packaging/build-deb.py` builds from a clean commit, derives a monotonic alpha
-version from the Git commit count, and writes the artifact below ignored
-`dist/`. Building and inspecting it require no privilege and make no system
+`packaging/build-deb.py` builds from a clean commit with full Git history, derives
+a monotonic alpha version from the Git commit count, and writes the artifact
+below ignored `dist/`. Shallow histories are rejected rather than emitting a
+lower version for newer code. CI uses `fetch-depth: 0`. Building and inspecting it require no privilege and make no system
 changes:
 
 ```sh
 ./packaging/build-deb.py
-dpkg-deb --info dist/kukni_*.deb
-dpkg-deb --contents dist/kukni_*.deb
+# Substitute the exact filename printed by the builder:
+dpkg-deb --info dist/kukni_VERSION_all.deb
+dpkg-deb --contents dist/kukni_VERSION_all.deb
 /usr/sbin/apparmor_parser --skip-kernel-load --skip-cache \
   packaging/debian/io.github.lamosty.Kukni.apparmor
 ```
@@ -56,24 +61,30 @@ therefore remove Sushi; restoring Sushi later requires reinstalling the
 ### Migrate from the per-user preview
 
 Per-user D-Bus activation and desktop files take precedence over system files,
-and `~/.local/bin/kukni` can take precedence in the shell. Before installing the
-`.deb`:
+and `~/.local/bin/kukni` can take precedence in the shell. Package installation
+must not delete home-directory files as root. This is a one-time user migration:
 
-1. Close any running Kukni preview.
-2. As the normal desktop user, run the existing user-owned
-   `~/.local/lib/kukni/uninstall.sh`. Never use `sudo` to delete these files from
-   a home directory. A custom-prefix install must use the uninstaller stored in
-   that prefix instead.
-3. Install the local `.deb` normally with APT, for example
-   `sudo apt install ./dist/kukni_*.deb`.
-4. Run `/usr/bin/kukni --check` explicitly. The image and PDF entries are real
-   synthetic-file render self-tests; the optional HTML entry checks
-   prerequisites only and does not claim a page was rendered.
+1. Install the `.deb` with APT and confirm that installation completed. Keeping
+   the old user copy until this succeeds avoids losing a working previewer if
+   package installation fails.
+2. Close the running preview window. As the normal desktop user run the old
+   installed `~/.local/lib/kukni/uninstall.sh`, without sudo or `--force`. A
+   custom-prefix installation must use its own installed uninstaller instead.
+   From a current checkout, `./uninstall.sh --dry-run` provides a no-change
+   preflight for the default installation.
+3. Run `/usr/bin/kukni --check` explicitly. Images and PDF must render real
+   synthetic content. Shadowing launchers/activation are required failures;
+   optional HTML checks only report prerequisites.
+4. Test Space in Nautilus. If an old process still owns the service, close it;
+   sign out/in if necessary. Updating activation files does not replace a
+   running process.
 
-The check warns, without reading or printing private file contents, if default
-per-user Kukni files still shadow a system install. If the old preview process
-still owns the session-bus name, sign out and back in before testing Space-key
-activation again.
+Diagnostics inspect standard activation precedence, including custom XDG
+locations, and query existing D-Bus owners without activating apps. Unavailable
+session-bus inspection is reported honestly rather than claimed as a live
+activation test. No private documents, service contents, environment values, or
+raw process command lines are printed. `make dev` is explicitly excluded from
+production-name ownership and never changes this setup.
 
 ### AppArmor conffile lifecycle
 
@@ -90,6 +101,19 @@ Use the package manager's explicit conffile-recovery mechanism when restoration
 is intended. Plain removal retains conffiles; `sudo apt purge kukni` performs
 complete package configuration/profile removal. A subsequent install creates a
 fresh packaged profile.
+
+## Current CI download channel
+
+After unit, GTK, and installed-runtime checks succeed, main-branch push jobs
+upload `kukni-ubuntu-24.04-<commit>` with the exact tested `.deb` and
+`SHA256SUMS`. Downloads require GitHub sign-in and expire after 30 days. This
+avoids requiring every tester to clone and build, but is not a stable release
+channel, signed package provenance, or automatic update service. Only the
+package and checksum are uploaded, never the checkout or test documents.
+
+The next public distribution milestone is a versioned GitHub Release download
+with reviewable release notes, followed by a signed APT channel. No release,
+repository account, signing credential, or deployment is created by the build.
 
 ## Ubuntu release path
 

@@ -5,15 +5,20 @@
 set -eu
 
 force=0
+legacy_user_install=0
 
 usage() {
-    printf 'Usage: %s [--force]\n' "$0"
-    printf 'Install the standalone Kukni application for the current user.\n'
+    printf 'Usage: %s --legacy-user-install [--force]\n' "$0"
+    printf 'Deprecated: copy Kukni into a per-user prefix.\n'
+    printf 'For normal use install the Ubuntu .deb; for development run make dev.\n'
     printf 'PREFIX defaults to $HOME/.local; XDG_DATA_HOME defaults to $PREFIX/share.\n'
 }
 
 for argument in "$@"; do
     case "$argument" in
+        --legacy-user-install)
+            legacy_user_install=1
+            ;;
         --force)
             force=1
             ;;
@@ -27,6 +32,17 @@ for argument in "$@"; do
             ;;
     esac
 done
+
+# @decision A copied source install can silently shadow a newer system package
+# through both PATH and D-Bus. Keep this tested migration-era implementation
+# only behind deliberate opt-in; the edit/run loop must not install anything.
+if [ "$legacy_user_install" -ne 1 ]; then
+    printf 'Per-user copied installation is no longer the default. No files changed.\n' >&2
+    printf 'Use the Ubuntu .deb for Nautilus previews, or make dev for a source checkout.\n' >&2
+    printf 'See README.md for package downloads and legacy migration.\n' >&2
+    exit 2
+fi
+printf 'Warning: legacy user installation can shadow the Ubuntu package and lacks its sandbox policy.\n' >&2
 
 for required_command in id dirname realpath readlink python3 sha256sum install \
     stat mktemp awk find sort cp mv ln chmod cut uniq cmp grep mkdir rm rmdir; do

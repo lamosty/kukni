@@ -9,7 +9,7 @@ must stay useful, testable, and honest about its containment boundaries.
 The `main` branch already provides:
 
 - a standalone GTK4/libadwaita application;
-- per-user Nautilus D-Bus activation and continuous arrow-key navigation;
+- packaged Nautilus session D-Bus activation and continuous arrow-key navigation;
 - one persistent preview window with cancellation and stale-result protection;
 - standalone Canon CR2 previews using the embedded display JPEG in a bounded,
   killable decoder worker that returns validated raw RGBA;
@@ -19,8 +19,10 @@ The `main` branch already provides:
 - bounded text/source previews and a metadata-only unavailable state;
 - a bounded native XLSX view that does not execute formulas or active content;
 - sandbox-gated HTML and lazy PDF page navigation;
-- a conflict-checked per-user installer and ownership-aware uninstaller;
-- a local Ubuntu package builder and headless installation diagnostics;
+- a no-install, separately identified development mode;
+- legacy per-user migration with an ownership-aware uninstaller;
+- an Ubuntu package builder, tested CI alpha downloads, and activation-aware
+  headless installation diagnostics;
 - synthetic parser, real image-worker, GTK, D-Bus, and installation tests.
 
 This is enough to test Kukni as an independent previewer, but it is not yet a
@@ -39,6 +41,8 @@ Before the first tagged release:
 - add application icons and AppStream metadata;
 - make missing core dependencies fail with a clear, actionable message;
 - publish an explicit compatibility and renderer matrix;
+- publish a stable, versioned download rather than requiring a GitHub Actions
+  sign-in; follow with a signed APT update channel;
 - close alpha defects without weakening fallback or sandbox policy.
 
 Common images, page navigation, usable sizing/zoom, and working installation are

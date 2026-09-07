@@ -3,6 +3,21 @@
 Thanks for helping build a faster, calmer, and safer Quick Look experience for
 Linux.
 
+## Edit/run loop
+
+Use `make dev` (or `make dev FILE=/path/to/image.png`) from the checkout. Each
+launch uses the current source, identifies itself as Kukni Development, and
+cannot register Nautilus's preview service or forward to the installed app.
+Close and relaunch after edits; no copied installation or package rebuild is
+needed for this loop. `./install.sh` is a deprecated compatibility path, not a
+development setup command.
+
+Use `make check` for the installed package and `make package` only to prepare an
+actual upgrade. Package versions require clean commits and complete Git history.
+Source PDF/HTML may fall back under Ubuntu namespace restrictions; do not alter
+system security to hide that difference. Installed-package CI must render a real
+PNG and PDF. See the README for one-time development dependencies.
+
 ## Before opening a pull request
 
 1. Read [Architecture](docs/ARCHITECTURE.md) and preserve the separation between

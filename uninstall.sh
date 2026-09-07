@@ -5,14 +5,19 @@
 set -eu
 
 force=0
+dry_run=0
 
 usage() {
-    printf 'Usage: %s [--force]\n' "$0"
+    printf 'Usage: %s [--dry-run] [--force]\n' "$0"
     printf 'Remove the standalone Kukni application from the current user account.\n'
+    printf '--dry-run verifies ownership without changing installed files.\n'
 }
 
 for argument in "$@"; do
     case "$argument" in
+        --dry-run)
+            dry_run=1
+            ;;
         --force)
             force=1
             ;;
@@ -296,6 +301,14 @@ while IFS="$tab" read -r installed_kind expected_hash expected_mode _record_root
         exit 1
     fi
 done < "$removal_plan"
+
+# @why Migration should be inspectable before switching the desktop provider.
+# Use the very same complete ownership checks as removal, but neither delete
+# files nor reload the session bus when only a preflight was requested.
+if [ "$dry_run" -eq 1 ]; then
+    printf 'Verified the legacy Kukni removal plan. No installed files changed.\n'
+    exit 0
+fi
 
 while IFS="$tab" read -r _installed_kind _expected_hash _expected_mode _record_root \
     _record_relative target_file; do

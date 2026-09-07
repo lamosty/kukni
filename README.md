@@ -17,9 +17,9 @@ Kukni is its own GTK4 application. It does **not** require GNOME Sushi.
 _Kukni_ is colloquial Slovak for “take a look.”
 
 > [!IMPORTANT]
-> Kukni is an early alpha with no published binary release yet. The current
-> validation target is Ubuntu 24.04 with Nautilus 46. The repository includes a
-> local Ubuntu package builder; read the installation and format limits below.
+> Kukni is an early alpha, targeting Ubuntu 24.04 with Nautilus 46. Tested
+> `.deb` downloads are available from successful main-branch CI runs. There is
+> not yet a stable release or automatic-update repository; see the limits below.
 
 ## What already works
 
@@ -92,80 +92,85 @@ limit and the same pixel, CPU, memory, and deadline limits. Raster/CR2 workers
 remain process-bounded rather than filesystem/network isolated in the current
 Ubuntu package too; its namespace policy enables the separate PDF/HTML paths.
 
-## Ubuntu package
+## Install on Ubuntu 24.04
 
-The package declares its runtime dependencies and includes a Kukni-specific
-AppArmor namespace permission so its mandatory PDF sandbox can start on Ubuntu
-24.04. It does not disable system security or make PDF rendering unconfined.
+**Use the Ubuntu package for everyday previews. Do not install a source copy
+into `~/.local` to develop Kukni.** They are separate workflows:
 
-There is no published binary release yet. To build from a clean reviewed checkout:
+| Purpose | Workflow |
+| --- | --- |
+| Preview files with Space in Nautilus | Install the tested `.deb` once; update it with APT when a newer package is downloaded |
+| Edit and try the code | `make dev` from the checkout; no installation and no Space-key takeover |
+| Verify the desktop installation | `make check` or `/usr/bin/kukni --check` |
+| Build a reviewable package | `make package` from a clean checkout with full Git history |
+
+### Download a tested alpha
+
+1. Open [Tests](https://github.com/lamosty/kukni/actions/workflows/test.yml) and
+   choose a successful **main-branch push** run. Older runs may have no artifact.
+2. Download its `kukni-ubuntu-24.04-…` artifact and extract the ZIP into an empty
+   directory. It contains the **same package that passed installed PNG/PDF
+   self-tests**, plus `SHA256SUMS`.
+3. In that directory, verify the checksum, then install the one downloaded
+   package (replace `VERSION` with its actual filename):
 
 ```sh
-git clone https://github.com/lamosty/kukni.git
-cd kukni
-python3 packaging/build-deb.py
-sudo apt install ./dist/kukni_*.deb
+sha256sum --check SHA256SUMS
+sudo apt install ./kukni_VERSION_all.deb
 /usr/bin/kukni --check
 ```
 
-`--check` must succeed for core images and PDF; it actually renders synthetic
-content rather than accepting an unavailable-preview fallback. Optional HTML
-prerequisites are reported separately.
+The package declares its runtime dependencies and includes the Kukni-specific
+AppArmor namespace permission needed for the PDF sandbox on Ubuntu 24.04. It
+conflicts with `gnome-sushi`, which provides the same Nautilus preview service;
+APT shows that replacement before installation. No global security setting is
+changed.
 
-**Already using the per-user installer?** Close the old preview and run
-`~/.local/lib/kukni/uninstall.sh` **without sudo** before installing the package.
-Otherwise its per-user launcher or activation file can shadow the new package.
-The package conflicts with `gnome-sushi` because both provide Nautilus's preview
-service; APT shows that replacement before installation. See
-[Packaging](docs/PACKAGING.md) for migration and removal details.
+These are **expiring CI alpha downloads**, not signed public releases. GitHub
+requires signing in to download workflow artifacts. Checksums detect corruption;
+they are not a publisher signature. A stable download page and signed APT updates
+remain planned. [GitHub's artifact download guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts)
+explains the current download route.
 
-## Per-user source installation (development)
+### Already used `./install.sh`?
 
-The source installer remains useful for development, but cannot install the
-system sandbox policy. PDF and HTML may remain unavailable even with their
-runtime packages installed. On Ubuntu 24.04, install the source dependencies:
+A newer package does **not** replace files inside your home directory. Old
+per-user D-Bus files can still make Space launch an obsolete Kukni—even when the
+new package's image and PDF renderers work correctly.
 
-```sh
-sudo apt install git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 util-linux webp-pixbuf-loader
-```
+After the package has installed successfully:
 
-Then install Kukni without `sudo`:
+1. Close any Kukni preview window.
+2. Run the old copy's ownership-checking uninstaller **without sudo**:
+
+   ```sh
+   ~/.local/lib/kukni/uninstall.sh
+   ```
+
+3. Run `/usr/bin/kukni --check`, then test Space in Nautilus. If an old process
+   still owns the preview service, close it; sign out and back in if necessary.
+
+Do not use `--force` if the uninstaller reports modified or unexpected files;
+review them first. For custom-prefix installs use that prefix's installed
+uninstaller. A current checkout also offers `./uninstall.sh --dry-run` to inspect
+the removal plan without changing installed files.
+
+New package checks treat shadowing activation as a **failure**, not an optional
+warning. They report whether a running preview owner belongs to the package;
+they never start or stop desktop applications. No running owner is normal before
+Space is pressed. Source checks do not certify the desktop installation.
+
+### Build locally instead
 
 ```sh
 git clone https://github.com/lamosty/kukni.git
 cd kukni
-./install.sh
+make package
 ```
 
-The installer places the application under `~/.local`, adds a desktop entry,
-and registers Kukni as your Nautilus preview service. It checks conflicts and
-will not overwrite modified or unowned files unless you explicitly use
-`--force` after reviewing them.
-
-Select a local file in Nautilus and press <kbd>Space</kbd>. If another preview
-service was already running during installation, sign out and back in once so
-the new user-session activation takes effect.
-
-You can also launch Kukni directly:
-
-```sh
-kukni /path/to/file
-```
-
-If `~/.local/bin` is not on your `PATH`, use `~/.local/bin/kukni` or add that
-directory to your shell configuration.
-
-### Optional renderers
-
-On Ubuntu, install the optional PDF and HTML runtime packages with:
-
-```sh
-sudo apt install poppler-utils bubblewrap gir1.2-webkit-6.0
-```
-
-Installing those packages does not guarantee that the host's user-namespace
-policy permits the sandbox; Kukni checks at runtime and falls back safely when
-it does not.
+Install the exact output filename printed by the builder, not a wildcard over
+old builds. Package building changes no system files and needs no root. See
+[Packaging](docs/PACKAGING.md) for the layout, migration, and release policy.
 
 ## Controls
 
@@ -185,44 +190,53 @@ Arrow-key folder navigation is available when Nautilus opened the preview.
 1:1 refers to the retained preview, not full-source detail for downscaled images
 or vector PDF pages; the control tooltip explains this limit.
 
-## Uninstall the per-user source copy
+## Remove Kukni
 
-Do not use `sudo`:
-
-```sh
-./uninstall.sh
-```
-
-You can also run the installed copy at
-`~/.local/lib/kukni/uninstall.sh`. The uninstaller verifies Kukni's ownership
-manifest and refuses to remove modified or unexpected files unless `--force`
-is explicitly supplied.
-
-### Migrating from GNOME Sushi
-
-Sushi is neither installed nor used by the default Kukni setup. If it is still
-installed from an earlier setup, verify that Kukni opens from Nautilus first.
-Ubuntu users may then remove the old package with:
+For the Ubuntu package:
 
 ```sh
-sudo apt remove gnome-sushi
+sudo apt remove kukni
 ```
 
-Kukni does not ship or install a Sushi plugin.
-
-## Packages and releases
-
-There is no public Kukni APT repository or Snap release today. The local `.deb`
-builder is the first packaging step; a signed Launchpad PPA and normal APT
-updates come after installed-package validation. Snap is not the first target
-because its confinement must support Nautilus's session D-Bus contract and
-access to arbitrary selected files.
-
-See [Packaging](docs/PACKAGING.md) for the release plan.
+Use `sudo apt purge kukni` to also remove its package configuration. Removing
+Kukni does not reinstall another previewer. The legacy per-user uninstaller
+above removes only its own manifest-verified files and never removes the package.
 
 ## Development
 
-Run the parser, renderer, safety, and installer tests:
+Install the development dependencies once (the installed Kukni package already
+provides the core runtime):
+
+```sh
+sudo apt install make git python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+  util-linux webp-pixbuf-loader xvfb xauth
+```
+
+Then edit the checkout and relaunch:
+
+```sh
+make dev
+make dev FILE=/path/to/picture.png
+```
+
+This runs the current working tree as **Kukni Development**, with a separate
+application identity and no Nautilus preview registration. It never copies code
+into `~/.local`, changes activation files, or forwards your request to an old
+installed instance. Use Ctrl+O to choose another file. Folder arrow navigation
+belongs to the installed Nautilus integration, not this standalone dev window.
+
+The development mode does **not** borrow the package launcher's AppArmor
+permission. PDF/HTML may therefore be unavailable from source on Ubuntu even
+when they work in the installed app. Test the full sandboxed runtime through the
+package and installed-package CI; do not disable security to make a dev preview
+pass. `./bin/kukni --version` identifies the checkout revision and dirty state;
+`/usr/bin/kukni --version` identifies the installed package.
+
+Plain `./install.sh` and `make install` now stop without installing anything.
+The old copier is retained behind `--legacy-user-install` only for explicit
+compatibility work; it is not the development workflow.
+
+Run the parser, renderer, safety, and legacy-migration tests:
 
 ```sh
 make test

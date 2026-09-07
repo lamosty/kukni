@@ -30,13 +30,20 @@ export KUKNI_SKIP_DBUS_RELOAD=1
 export HOME="$test_root/home"
 mkdir -p -- "$HOME"
 
+# An ordinary install invocation must no longer create a competing desktop
+# provider. Force only resolves ownership conflicts, not this explicit opt-in.
+expect_failure "$project_dir/install.sh"
+expect_failure "$project_dir/install.sh" --force
+"$project_dir/install.sh" --help >/dev/null
+test ! -e "$HOME/.local" || fail 'default installer created a per-user copy'
+
 # Paths whose escaping differs between Desktop Entry and D-Bus syntax are
 # rejected before any installation destination is created.
 for hostile_suffix in 'back\slash' 'double"quote' 'back`tick' 'dollar$sign'; do
     hostile_prefix=$test_root/$hostile_suffix
     expect_failure env HOME="$HOME" PREFIX="$hostile_prefix" \
         XDG_DATA_HOME="$test_root/hostile-data" KUKNI_SKIP_DBUS_RELOAD=1 \
-        "$project_dir/install.sh"
+        "$project_dir/install.sh" --legacy-user-install
     test ! -e "$hostile_prefix" || fail 'hostile PREFIX created files'
 done
 
@@ -56,13 +63,13 @@ mkdir -p -- "$PREFIX/bin" "$app_root" \
 chmod 0700 -- "$PREFIX/bin" "$app_root" \
     "$XDG_DATA_HOME/applications" "$XDG_DATA_HOME/dbus-1/services"
 printf '%s\n' 'foreign previewer configuration' > "$previewer_service"
-expect_failure "$project_dir/install.sh"
+expect_failure "$project_dir/install.sh" --legacy-user-install
 test ! -e "$launcher" && test ! -L "$launcher" || \
     fail 'conflict left a partial launcher installation'
 test "$(cat "$previewer_service")" = 'foreign previewer configuration' || \
     fail 'conflict changed the foreign previewer service'
 
-"$project_dir/install.sh" --force >/dev/null
+"$project_dir/install.sh" --legacy-user-install --force >/dev/null
 
 # The private runtime retains bin/src/helpers layout. The public command points
 # to a tiny -B launcher so normal execution cannot create bytecode in that tree.
@@ -87,6 +94,13 @@ while IFS= read -r source_file; do
 done
 
 test -f "$manifest" || fail 'ownership manifest was not installed'
+
+manifest_before=$(sha256sum -- "$manifest")
+"$project_dir/uninstall.sh" --dry-run >/dev/null
+test -L "$launcher" && test -f "$previewer_service" || \
+    fail 'uninstall preflight removed activation files'
+test "$(sha256sum -- "$manifest")" = "$manifest_before" || \
+    fail 'uninstall preflight changed ownership manifest'
 test ! -e "$XDG_DATA_HOME/sushi" || fail 'standalone installer wrote legacy previewer files'
 
 outer_link_mode=$(stat -c '%a' "$launcher")
@@ -206,15 +220,15 @@ else
 fi
 
 # Reinstalling identical owned files is idempotent.
-"$project_dir/install.sh" >/dev/null
+"$project_dir/install.sh" --legacy-user-install >/dev/null
 
 # A late conflict must be found before an earlier absent file is restored.
 rm -- "$app_root/bin/kukni"
 printf '\nlocal change\n' >> "$previewer_service"
-expect_failure "$project_dir/install.sh"
+expect_failure "$project_dir/install.sh" --legacy-user-install
 test ! -e "$app_root/bin/kukni" || \
     fail 'failed preflight partially restored an earlier target'
-"$project_dir/install.sh" --force >/dev/null
+"$project_dir/install.sh" --legacy-user-install --force >/dev/null
 
 # Fail a real mv during commit. Rollback must restore edited content, leave a
 # previously absent target absent, and put the original manifest back.
@@ -241,7 +255,7 @@ SH
 chmod 0755 -- "$fake_bin/mv"
 expect_failure env PATH="$fake_bin:$PATH" KUKNI_REAL_MV="$real_mv" \
     KUKNI_MV_COUNT_FILE="$test_root/mv-count" KUKNI_FAIL_MV_AT=4 \
-    "$project_dir/install.sh" --force
+    "$project_dir/install.sh" --legacy-user-install --force
 grep -Fq 'rollback sentinel' "$app_root/NOTICE.md" || \
     fail 'rollback did not restore modified content'
 test ! -e "$app_root/VERSION" || fail 'rollback retained a newly restored target'
@@ -251,7 +265,7 @@ if find "$PREFIX" "$XDG_DATA_HOME" -name '.kukni-install.*' -o \
     -name '.kukni-backup.*' | grep -q .; then
     fail 'rollback left transaction files behind'
 fi
-"$project_dir/install.sh" --force >/dev/null
+"$project_dir/install.sh" --legacy-user-install --force >/dev/null
 
 # A valid old-manifest record absent from the new release is removed during a
 # successful upgrade, then forgotten only after the transaction commits.
@@ -261,7 +275,7 @@ chmod 0644 -- "$obsolete_file"
 obsolete_hash=$(sha256sum "$obsolete_file" | awk '{ print $1 }')
 printf 'file\t%s\t644\tP\tlib/kukni/obsolete-runtime-file\n' \
     "$obsolete_hash" >> "$manifest"
-"$project_dir/install.sh" >/dev/null
+"$project_dir/install.sh" --legacy-user-install >/dev/null
 test ! -e "$obsolete_file" || fail 'upgrade retained an obsolete owned file'
 if grep -Fq 'obsolete-runtime-file' "$manifest"; then
     fail 'new manifest retained an obsolete record'
@@ -271,7 +285,7 @@ fi
 # override cannot become an unowned, still-active file.
 new_data_home=$test_root/new-data-home
 expect_failure env HOME="$HOME" PREFIX="$PREFIX" XDG_DATA_HOME="$new_data_home" \
-    KUKNI_SKIP_DBUS_RELOAD=1 "$project_dir/install.sh" --force
+    KUKNI_SKIP_DBUS_RELOAD=1 "$project_dir/install.sh" --legacy-user-install --force
 test -e "$previewer_service" || fail 'data-root refusal removed old activation'
 test ! -e "$new_data_home" || fail 'data-root refusal created new activation data'
 
@@ -279,6 +293,9 @@ test ! -e "$new_data_home" || fail 'data-root refusal created new activation dat
 # matching files in place. With --force, unknown files are still preserved.
 printf '\nlocal change\n' >> "$app_root/src/kukni/application.py"
 printf '%s\n' 'keep me' > "$app_root/local-note"
+expect_failure "$project_dir/uninstall.sh" --dry-run
+test -e "$desktop" && test -e "$manifest" || \
+    fail 'failed uninstall preflight removed installed files'
 expect_failure "$project_dir/uninstall.sh"
 test -e "$desktop" || fail 'failed uninstall partially removed desktop metadata'
 "$project_dir/uninstall.sh" --force >/dev/null
@@ -292,7 +309,7 @@ rm -- "$app_root/local-note"
 rmdir -- "$app_root"
 
 # The installed uninstaller remembers custom data paths without extra variables.
-"$project_dir/install.sh" >/dev/null
+"$project_dir/install.sh" --legacy-user-install >/dev/null
 installed_uninstaller=$app_root/uninstall.sh
 unset PREFIX XDG_DATA_HOME
 "$installed_uninstaller" >/dev/null
@@ -306,7 +323,7 @@ test ! -e "$test_root/data with space%/dbus-1/services/org.gnome.NautilusPreview
 export HOME="$test_root/default-home"
 mkdir -p -- "$HOME"
 unset PREFIX XDG_DATA_HOME
-"$project_dir/install.sh" >/dev/null
+"$project_dir/install.sh" --legacy-user-install >/dev/null
 test -x "$HOME/.local/bin/kukni" || fail 'default launcher is not in ~/.local/bin'
 test -f "$HOME/.local/lib/kukni/src/kukni/application.py" || \
     fail 'default private application tree is missing'
@@ -323,7 +340,7 @@ test ! -e "$HOME/.local/share/sushi" || fail 'default install created a legacy d
 export PREFIX="$test_root/sudo-prefix"
 export XDG_DATA_HOME="$test_root/sudo-data"
 SUDO_UID=1000; export SUDO_UID
-expect_failure "$project_dir/install.sh"
+expect_failure "$project_dir/install.sh" --legacy-user-install
 test ! -e "$PREFIX/bin/kukni" && test ! -L "$PREFIX/bin/kukni" || \
     fail 'sudo-marked install wrote a launcher'
 unset SUDO_UID

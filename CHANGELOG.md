@@ -44,6 +44,15 @@ All notable changes to this project will be documented here.
 
 ### Installation and compatibility
 
+- Separate the edit/run loop from installation: `make dev` runs a labelled,
+  non-unique development app that cannot own Nautilus's preview service. Keep
+  copied per-user installs behind explicit legacy opt-in and add a no-change
+  uninstall preflight for migration.
+- Fail installed checks when an old launcher or activation entry shadows the
+  package; inspect existing D-Bus owners without starting desktop applications.
+- Reject shallow-history package versions and retain the exact CI-tested `.deb`
+  with checksums as a downloadable alpha artifact, not a stable release channel.
+
 - Add a rootless Ubuntu `.deb` builder with runtime dependencies and app-scoped
   namespace permission for its root-owned launcher. Add headless `--check`
   diagnostics that require actual core image/PDF rendering and an installed
