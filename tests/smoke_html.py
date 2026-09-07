@@ -4,6 +4,7 @@
 
 """Verify HTML either renders securely or degrades without closing Kukni."""
 
+import argparse
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sys
@@ -20,7 +21,11 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib
 
-from kukni.renderers.html import HtmlRenderer, webkit_runtime_available
+from kukni.renderers.html import (
+    LOCKED_DOWN_SETTINGS,
+    HtmlRenderer,
+    webkit_runtime_available,
+)
 from kukni.renderers.registry import RendererRegistry
 from kukni.session import PreviewState
 from kukni.window import PreviewWindow
@@ -32,17 +37,23 @@ class HtmlSmokeApplication(Adw.Application):
         sample: Path,
         server: ThreadingHTTPServer,
         external_url: str,
+        require_preview: bool,
     ) -> None:
         super().__init__(application_id="io.github.lamosty.Kukni.HtmlSmoke")
         self.sample = sample
         self.server = server
         self.external_url = external_url
         self.failures: list[str] = []
+        runtime_available = webkit_runtime_available()
         self.expected = (
             PreviewState.PREVIEW
-            if webkit_runtime_available()
+            if runtime_available
             else PreviewState.FALLBACK
         )
+        if require_preview and not runtime_available:
+            self.failures.append(
+                "a secure WebKit runtime was required but its sandbox probe failed"
+            )
         self.window = None
         self.checks = 0
 
@@ -76,6 +87,18 @@ class HtmlSmokeApplication(Adw.Application):
             if document is None:
                 self.failures.append("HTML renderer did not return its protected view")
             else:
+                settings = document.get_settings()
+                for property_name, expected in LOCKED_DOWN_SETTINGS.items():
+                    if settings.find_property(property_name) is None:
+                        continue
+                    if property_name == "enable-dns-prefetching":
+                        # This compatibility property warns on reads in WebKit
+                        # versions that already force it off.
+                        continue
+                    if settings.get_property(property_name) != expected:
+                        self.failures.append(
+                            f"WebKit setting {property_name} was not locked down"
+                        )
                 document.load_uri(f"{self.external_url}/post-ready-navigation")
             GLib.timeout_add(350, self._finish_after_policy_check)
             return GLib.SOURCE_REMOVE
@@ -110,6 +133,13 @@ class NetworkProbeHandler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--require-preview",
+        action="store_true",
+        help="fail instead of accepting the prerequisite-only fallback",
+    )
+    arguments = parser.parse_args()
     server = NetworkProbeServer()
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
@@ -127,7 +157,12 @@ def main() -> int:
                 "<h1>Safe HTML preview</h1>",
                 encoding="utf-8",
             )
-            application = HtmlSmokeApplication(sample, server, external_url)
+            application = HtmlSmokeApplication(
+                sample,
+                server,
+                external_url,
+                arguments.require_preview,
+            )
             exit_code = application.run(["kukni-html-smoke"])
             failures = application.failures
             expected = application.expected.value

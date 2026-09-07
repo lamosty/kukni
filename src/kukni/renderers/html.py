@@ -11,7 +11,10 @@ import os
 import shutil
 import stat
 import threading
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from html.parser import HTMLParser
 
 import gi
 
@@ -32,7 +35,10 @@ except (ImportError, ValueError):  # pragma: no cover - depends on the distro
 
 MAX_HTML_BYTES = 8 * 1024 * 1024
 READ_CHUNK_BYTES = 64 * 1024
-LOAD_TIMEOUT_SECONDS = 10
+LOAD_TIMEOUT_SECONDS = 5
+MAX_SANITIZED_HTML_CHARACTERS = MAX_HTML_BYTES * 2
+SANITIZE_TIMEOUT_SECONDS = 2.0
+SANITIZE_CHUNK_CHARACTERS = 64 * 1024
 
 HTML_CONTENT_TYPES = frozenset(("text/html", "application/xhtml+xml"))
 HTML_SUFFIXES = (".html", ".htm", ".xhtml")
@@ -59,7 +65,8 @@ CONTENT_SECURITY_POLICY = "; ".join(
     )
 )
 
-_CSP_META = (
+_DOCUMENT_PREFIX = (
+    '<!doctype html>'
     '<meta charset="utf-8">'
     '<meta http-equiv="Content-Security-Policy" content="'
     f'{html.escape(CONTENT_SECURITY_POLICY, quote=True)}">'
@@ -103,6 +110,360 @@ class HtmlPreviewError(RuntimeError):
 
 class _PreviewCancelled(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class StaticHtmlPreview:
+    """An inert document plus an honest description of omitted capabilities."""
+
+    document: bytes
+    blocked_active_content: bool
+    blocked_external_resources: bool
+    requires_active_content: bool
+
+
+_VOID_ELEMENTS = frozenset(
+    (
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    )
+)
+_DROP_WITH_CONTENT = frozenset(
+    ("applet", "frameset", "iframe", "object", "script")
+)
+_DROP_ELEMENTS = frozenset(
+    ("base", "embed", "frame", "link", "meta", "param", "source", "track")
+)
+_VOID_ACTIVE_ELEMENTS = frozenset(("embed", "frame"))
+_ACTIVE_ATTRIBUTES = frozenset(("action", "formaction", "ping", "srcdoc"))
+_URL_ATTRIBUTES = frozenset(("href", "poster", "src", "srcset", "xlink:href"))
+
+
+class _StaticHtmlSanitizer(HTMLParser):
+    """Serialize only passive markup; WebKit's CSP remains the security boundary."""
+
+    def __init__(self, check_request: Callable[[], None]) -> None:
+        super().__init__(convert_charrefs=False)
+        self.check_request = check_request
+        self.parts: list[str] = []
+        self.characters = 0
+        self.drop_depth = 0
+        self.style_depth = 0
+        self.head_depth = 0
+        self.script_count = 0
+        self.visible_text_characters = 0
+        self.has_static_visual = False
+        self.has_app_loader_marker = False
+        self.blocked_active_content = False
+        self.blocked_external_resources = False
+
+    def _append(self, value: str) -> None:
+        self.check_request()
+        self.characters += len(value)
+        if self.characters > MAX_SANITIZED_HTML_CHARACTERS:
+            raise HtmlPreviewError("The sanitized HTML preview is too large")
+        self.parts.append(value)
+
+    @staticmethod
+    def _is_external(value: str) -> bool:
+        folded = value.lstrip().casefold()
+        return folded.startswith(("http:", "https:", "file:", "//"))
+
+    def _sanitize_css(self, value: str) -> str:
+        """Strip imports/external URLs in one forward pass.
+
+        CSS escaping is intentionally left to the mandatory CSP. This pass is
+        only an availability optimization and must stay linear for hostile text.
+        """
+
+        # CSS keywords are ASCII-insensitive. Unicode casefold can expand a
+        # character (for example ß), misaligning offsets into the original CSS.
+        folded = value.translate(str.maketrans(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz",
+        ))
+        parts: list[str] = []
+        cursor = 0
+        literal_start = 0
+        next_check = 0
+        length = len(value)
+        while cursor < length:
+            if cursor >= next_check:
+                self.check_request()
+                next_check = cursor + 4096
+            if folded.startswith("@import", cursor):
+                boundary = cursor + len("@import")
+                if boundary == length or not (
+                    folded[boundary].isalnum() or folded[boundary] in "-_"
+                ):
+                    end = value.find(";", boundary)
+                    self.blocked_external_resources = True
+                    parts.append(value[literal_start:cursor])
+                    if end < 0:
+                        literal_start = length
+                        break
+                    cursor = end + 1
+                    literal_start = cursor
+                    continue
+            if folded.startswith("url", cursor):
+                opening = cursor + 3
+                while opening < length and value[opening].isspace():
+                    opening += 1
+                if opening < length and value[opening] == "(":
+                    end = value.find(")", opening + 1)
+                    if end < 0:
+                        # Treat one unterminated function as the remaining CSS;
+                        # do not repeatedly scan the same suffix.
+                        payload = value[opening + 1 :]
+                        parts.append(value[literal_start:cursor])
+                        if self._css_url_is_external(payload):
+                            self.blocked_external_resources = True
+                            parts.append("url(data:,)")
+                        else:
+                            parts.append(value[cursor:])
+                        literal_start = length
+                        break
+                    payload = value[opening + 1 : end]
+                    if self._css_url_is_external(payload):
+                        self.blocked_external_resources = True
+                        parts.append(value[literal_start:cursor])
+                        parts.append("url(data:,)")
+                        literal_start = end + 1
+                    else:
+                        # Leave passive and data URLs in the pending literal run.
+                        pass
+                    cursor = end + 1
+                    continue
+            cursor += 1
+        if literal_start < length:
+            parts.append(value[literal_start:])
+        return "".join(parts)
+
+    @classmethod
+    def _css_url_is_external(cls, payload: str) -> bool:
+        value = payload.lstrip()
+        if value[:1] in ("'", '"'):
+            value = value[1:].lstrip()
+        return cls._is_external(value)
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.casefold()
+        if self.drop_depth:
+            if tag in _DROP_WITH_CONTENT:
+                self.drop_depth += 1
+            return
+        if tag in _DROP_WITH_CONTENT:
+            self.blocked_active_content = True
+            if tag == "script":
+                self.script_count += 1
+                if any(
+                    self._is_external(value or "")
+                    for name, value in attrs
+                    if name.casefold() == "src"
+                ):
+                    self.blocked_external_resources = True
+            else:
+                self.blocked_external_resources = True
+                self.has_app_loader_marker = True
+            self.drop_depth = 1
+            return
+        if tag in _DROP_ELEMENTS:
+            if tag in _VOID_ACTIVE_ELEMENTS:
+                self.blocked_active_content = True
+                self.has_app_loader_marker = True
+            elif tag == "base":
+                self.blocked_active_content = True
+            elif tag == "meta" and any(
+                name.casefold() == "http-equiv"
+                and (value or "").casefold() == "refresh"
+                for name, value in attrs
+            ):
+                self.blocked_active_content = True
+            if any(
+                self._is_external(value or "")
+                for name, value in attrs
+                if name.casefold() in _URL_ATTRIBUTES
+            ):
+                self.blocked_external_resources = True
+            return
+
+        sanitized_attrs: list[tuple[str, str | None]] = []
+        for raw_name, raw_value in attrs:
+            name = raw_name.casefold()
+            value = raw_value or ""
+            if name.startswith("on") or name in _ACTIVE_ATTRIBUTES:
+                self.blocked_active_content = True
+                continue
+            if name in _URL_ATTRIBUTES:
+                external = self._is_external(value)
+                if external:
+                    self.blocked_external_resources = True
+                # Only embedded images and same-document SVG references remain.
+                keep_data_image = (
+                    tag == "img"
+                    and name == "src"
+                    and value.lstrip().casefold().startswith("data:image/")
+                )
+                keep_fragment = name in ("href", "xlink:href") and value.startswith("#")
+                if not (keep_data_image or keep_fragment):
+                    continue
+                if keep_data_image:
+                    self.has_static_visual = True
+            if name == "style":
+                value = self._sanitize_css(value)
+            sanitized_attrs.append((name, value if raw_value is not None else None))
+
+        if tag == "svg":
+            self.has_static_visual = True
+        if tag == "head":
+            self.head_depth += 1
+        if tag == "style":
+            self.style_depth += 1
+        self._append(f"<{tag}")
+        for name, value in sanitized_attrs:
+            self._append(f" {html.escape(name, quote=True)}")
+            if value is not None:
+                self._append(f'="{html.escape(value, quote=True)}"')
+        self._append(">")
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        self.handle_starttag(tag, attrs)
+        normalized = tag.casefold()
+        if normalized in _DROP_WITH_CONTENT:
+            self.handle_endtag(normalized)
+        elif normalized not in _VOID_ELEMENTS and not self.drop_depth:
+            self.handle_endtag(normalized)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.casefold()
+        if self.drop_depth:
+            if tag in _DROP_WITH_CONTENT:
+                self.drop_depth -= 1
+            return
+        if tag in _DROP_ELEMENTS or tag in _VOID_ELEMENTS:
+            return
+        if tag == "head" and self.head_depth:
+            self.head_depth -= 1
+        if tag == "style" and self.style_depth:
+            self.style_depth -= 1
+        self._append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self.drop_depth:
+            folded = data.casefold()
+            if any(
+                marker in folded
+                for marker in (
+                    "fetch(",
+                    "createelement",
+                    "document.write",
+                    "iframe",
+                    "innerhtml",
+                )
+            ):
+                self.has_app_loader_marker = True
+            return
+        if not self.head_depth and not self.style_depth:
+            self.visible_text_characters += len("".join(data.split()))
+        self._append(self._sanitize_css(data) if self.style_depth else html.escape(data))
+
+    def handle_entityref(self, name: str) -> None:
+        if not self.drop_depth:
+            self._append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if not self.drop_depth:
+            self._append(f"&#{name};")
+
+
+def prepare_static_preview(
+    source: bytes | str,
+    *,
+    is_cancelled: Callable[[], bool] = lambda: False,
+) -> StaticHtmlPreview:
+    """Remove active/external loaders and retain meaningful static HTML.
+
+    @decision The parser is an availability layer, not the sandbox: WebKit still
+    receives mandatory settings and two intersecting CSPs. Removing dependencies
+    before loading prevents blocked app shells from holding the preview open.
+    """
+
+    if isinstance(source, bytes):
+        text = source.decode("utf-8", errors="replace")
+    elif isinstance(source, str):
+        text = source
+    else:
+        raise TypeError("HTML source must be bytes or text")
+
+    deadline = time.monotonic() + SANITIZE_TIMEOUT_SECONDS
+
+    def check_request() -> None:
+        if is_cancelled():
+            raise _PreviewCancelled
+        if time.monotonic() >= deadline:
+            raise HtmlPreviewError("HTML sanitization timed out")
+
+    check_request()
+    sanitizer = _StaticHtmlSanitizer(check_request)
+    try:
+        for offset in range(0, len(text), SANITIZE_CHUNK_CHARACTERS):
+            check_request()
+            sanitizer.feed(text[offset : offset + SANITIZE_CHUNK_CHARACTERS])
+        sanitizer.close()
+    except _PreviewCancelled:
+        raise
+    except HtmlPreviewError:
+        raise
+    except Exception as error:
+        raise HtmlPreviewError("The HTML structure could not be sanitized") from error
+
+    check_request()
+    requires_active_content = (
+        not sanitizer.has_static_visual
+        and (
+            (
+                sanitizer.visible_text_characters == 0
+                and (
+                    sanitizer.script_count > 0
+                    or sanitizer.has_app_loader_marker
+                )
+            )
+            or (
+                sanitizer.script_count > 0
+                and sanitizer.visible_text_characters < 128
+                and sanitizer.has_app_loader_marker
+                and sanitizer.blocked_external_resources
+            )
+        )
+    )
+    if requires_active_content:
+        passive_source = (
+            '<main style="font:16px system-ui;padding:2rem;max-width:44rem">'
+            "<h1>Interactive page not run</h1>"
+            "<p>This file contains an app shell that depends on scripts or external "
+            "content. Kukni blocks both, so there is no meaningful static page to show.</p>"
+            "</main>"
+        )
+    else:
+        passive_source = "".join(sanitizer.parts)
+
+    return StaticHtmlPreview(
+        document=build_safe_document(passive_source),
+        blocked_active_content=sanitizer.blocked_active_content,
+        blocked_external_resources=sanitizer.blocked_external_resources,
+        requires_active_content=requires_active_content,
+    )
 
 
 def user_namespace_policy_allows_sandbox(
@@ -191,13 +552,13 @@ def webkit_runtime_available() -> bool:
 
 
 def build_safe_document(source: bytes | str) -> bytes:
-    """Prefix a restrictive CSP while preserving all source bytes after it."""
+    """Prefix standards mode and a restrictive CSP before all source bytes."""
 
     if isinstance(source, str):
         source = source.encode("utf-8", errors="replace")
     elif not isinstance(source, bytes):
         raise TypeError("HTML source must be bytes or text")
-    return _CSP_META + source
+    return _DOCUMENT_PREFIX + source
 
 
 def build_error_document(message: str) -> bytes:
@@ -281,6 +642,17 @@ def apply_locked_down_settings(settings) -> None:
             settings.set_property(property_name, value)
 
 
+def stop_and_terminate_web_view(view) -> None:
+    """Stop a pending load and tear down its isolated content process."""
+
+    view.stop_loading()
+    try:
+        view.terminate_web_process()
+    except Exception:
+        # Some WebKit builds report an already-exited process as an error.
+        pass
+
+
 class HtmlRenderer:
     """Render local HTML without script, file, or network capabilities."""
 
@@ -289,6 +661,14 @@ class HtmlRenderer:
     def __init__(self) -> None:
         # A loading WebView is not parented until it succeeds, so retain it here.
         self._loading_views: dict[int, Gtk.Widget] = {}
+        # One parser/probe worker plus one replaceable pending request bounds
+        # rapid file-manager selection without making stale requests wait in a
+        # thread-pool queue.
+        self._worker_lock = threading.Lock()
+        self._worker_running = False
+        self._pending_worker: tuple[
+            Callable[[], None], Gio.Cancellable, ErrorCallback
+        ] | None = None
 
     def supports(self, file: Gio.File, info: Gio.FileInfo) -> bool:
         if not file.is_native() or info.get_file_type() != Gio.FileType.REGULAR:
@@ -303,7 +683,9 @@ class HtmlRenderer:
         is_html = content_type in HTML_CONTENT_TYPES or (
             generic_type and basename.endswith(HTML_SUFFIXES)
         )
-        return is_html and webkit_runtime_available()
+        # Capability selection runs on GTK's thread. The active Bubblewrap
+        # probe can take seconds, so the worker performs it after selection.
+        return is_html
 
     def render(
         self,
@@ -319,9 +701,6 @@ class HtmlRenderer:
         if path is None:
             on_error("HTML preview supports local files only")
             return
-        if not webkit_runtime_available():
-            on_error("Secure WebKitGTK HTML preview is unavailable on this system")
-            return
         if cancellable.is_cancelled():
             return
 
@@ -331,6 +710,27 @@ class HtmlRenderer:
                     path,
                     is_cancelled=cancellable.is_cancelled,
                 )
+                if cancellable.is_cancelled():
+                    raise _PreviewCancelled
+                preview = prepare_static_preview(
+                    source,
+                    is_cancelled=cancellable.is_cancelled,
+                )
+                if preview.requires_active_content:
+                    GLib.idle_add(
+                        self._deliver_active_notice,
+                        cancellable,
+                        on_ready,
+                    )
+                    return
+                if not webkit_runtime_available():
+                    GLib.idle_add(
+                        self._deliver_error,
+                        cancellable,
+                        on_error,
+                        "Secure WebKitGTK HTML preview is unavailable on this system",
+                    )
+                    return
             except _PreviewCancelled:
                 return
             except HtmlPreviewError as error:
@@ -338,17 +738,63 @@ class HtmlRenderer:
                 return
             GLib.idle_add(
                 self._create_web_view,
-                source,
+                preview,
                 cancellable,
                 on_ready,
                 on_error,
             )
 
-        threading.Thread(
-            target=worker,
-            name="kukni-html-reader",
-            daemon=True,
-        ).start()
+        self._queue_worker(worker, cancellable, on_error)
+
+    def _queue_worker(
+        self,
+        worker: Callable[[], None],
+        cancellable: Gio.Cancellable,
+        on_error: ErrorCallback,
+    ) -> None:
+        request = (worker, cancellable, on_error)
+        with self._worker_lock:
+            if self._worker_running:
+                self._pending_worker = request
+                return
+            self._worker_running = True
+        self._start_worker(request)
+
+    def _start_worker(
+        self,
+        request: tuple[Callable[[], None], Gio.Cancellable, ErrorCallback],
+    ) -> None:
+        worker, cancellable, on_error = request
+
+        def run() -> None:
+            try:
+                worker()
+            finally:
+                self._worker_finished()
+
+        try:
+            threading.Thread(
+                target=run,
+                name="kukni-html-reader",
+                daemon=True,
+            ).start()
+        except Exception:
+            GLib.idle_add(
+                self._deliver_error,
+                cancellable,
+                on_error,
+                "The HTML preview worker could not be started",
+            )
+            self._worker_finished()
+
+    def _worker_finished(self) -> None:
+        with self._worker_lock:
+            request = self._pending_worker
+            self._pending_worker = None
+            if request is None or request[1].is_cancelled():
+                self._worker_running = False
+                return
+        self._start_worker(request)
 
     @staticmethod
     def _deliver_error(
@@ -360,9 +806,47 @@ class HtmlRenderer:
             on_error(message)
         return GLib.SOURCE_REMOVE
 
+    @staticmethod
+    def _deliver_active_notice(
+        cancellable: Gio.Cancellable,
+        on_ready,
+    ) -> bool:
+        if cancellable.is_cancelled():
+            return GLib.SOURCE_REMOVE
+        page = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            margin_top=32,
+            margin_bottom=32,
+            margin_start=32,
+            margin_end=32,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        # An explanation is a compact card, not a large blank HTML viewport.
+        page.preview_geometry = ("fallback", 0, 0)
+        page.append(Gtk.Image(icon_name="applications-internet-symbolic", pixel_size=56))
+        title = Gtk.Label(label="Interactive page not run")
+        title.add_css_class("title-2")
+        page.append(title)
+        detail = Gtk.Label(
+            label=(
+                "This file is an app shell that depends on scripts or external "
+                "content. Kukni blocks both, so there is no meaningful static "
+                "page to show."
+            ),
+            wrap=True,
+            justify=Gtk.Justification.CENTER,
+            max_width_chars=48,
+        )
+        detail.add_css_class("dim-label")
+        page.append(detail)
+        on_ready(page, "Interactive HTML not run · active content blocked")
+        return GLib.SOURCE_REMOVE
+
     def _create_web_view(
         self,
-        source: bytes,
+        preview: StaticHtmlPreview,
         cancellable: Gio.Cancellable,
         on_ready,
         on_error,
@@ -437,11 +921,7 @@ class HtmlRenderer:
             lifetime_signal_ids.clear()
 
         def terminate_view() -> None:
-            view.stop_loading()
-            try:
-                view.terminate_web_process()
-            except Exception:
-                pass
+            stop_and_terminate_web_view(view)
 
         def fail(message: str) -> None:
             nonlocal settled
@@ -462,7 +942,20 @@ class HtmlRenderer:
             preview_ready = True
             clean_up_settlement()
             if not cancellable.is_cancelled():
-                on_ready(wrapper, "HTML document · active content blocked")
+                if preview.requires_active_content:
+                    detail = "Interactive HTML not run · active content blocked"
+                else:
+                    omitted = []
+                    if preview.blocked_active_content:
+                        omitted.append("active content")
+                    if preview.blocked_external_resources:
+                        omitted.append("external resources")
+                    detail = (
+                        f"Static HTML · {' and '.join(omitted)} blocked"
+                        if omitted
+                        else "Static HTML document"
+                    )
+                on_ready(wrapper, detail)
 
         def on_load_changed(_view, event) -> None:
             if event == WebKit.LoadEvent.FINISHED:
@@ -527,7 +1020,9 @@ class HtmlRenderer:
         def on_timeout() -> bool:
             nonlocal timeout_id
             timeout_id = 0
-            fail("HTML preview timed out")
+            fail(
+                f"HTML preview did not finish within {LOAD_TIMEOUT_SECONDS} seconds"
+            )
             return GLib.SOURCE_REMOVE
 
         settlement_signal_ids.extend(
@@ -550,9 +1045,13 @@ class HtmlRenderer:
             return GLib.SOURCE_REMOVE
         timeout_id = GLib.timeout_add_seconds(LOAD_TIMEOUT_SECONDS, on_timeout)
 
-        document = build_safe_document(source)
         try:
-            view.load_bytes(GLib.Bytes.new(document), "text/html", "UTF-8", None)
+            view.load_bytes(
+                GLib.Bytes.new(preview.document),
+                "text/html",
+                "UTF-8",
+                "about:blank",
+            )
         except Exception:
             fail("The HTML document could not be loaded safely")
         return GLib.SOURCE_REMOVE

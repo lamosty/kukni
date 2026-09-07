@@ -46,6 +46,7 @@ test-ui:
 	./tests/run-ui.sh python3 tests/smoke_images.py
 	./tests/run-ui.sh python3 tests/smoke_navigation.py
 	./tests/run-ui.sh python3 tests/smoke_html.py
+	./tests/run-ui.sh python3 tests/smoke_html_notice.py
 	./tests/run-ui.sh python3 tests/smoke_xlsx.py
 	./tests/run-ui.sh python3 tests/smoke_pdf.py
 	./tests/run-ui.sh python3 tests/smoke_media.py
