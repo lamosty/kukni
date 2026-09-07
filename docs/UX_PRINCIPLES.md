@@ -56,8 +56,11 @@ Focus or selection must not snap back to A; Space is not required again.
   player, and unavailable states a small, calm explanation. A family preset is
   only applied when that renderer actually returns content; an unavailable
   renderer still gets the fallback size.
-- Sizes are bounded by the current monitor's **logical** geometry, with desktop
-  margins and absolute upper caps. Monitor scale is not multiplied twice.
+- Sizes are bounded by 90% of the current monitor's **logical** geometry, up to
+  1800 × 1440 logical units. Large images can use that space rather than an
+  additional small canvas cap; tiny images still are not stretched. Text and
+  documents get taller reading areas, while metadata/audio stay compact.
+  Monitor scale is not multiplied twice.
 - A completed current preview suggests size after 140 ms of coalescing. Loading
   never resizes the outer window. Differences below the larger of a 64-unit
   floor or 12% threshold are ignored; similar photographs do not bounce.

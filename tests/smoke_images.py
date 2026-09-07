@@ -17,6 +17,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Graphene', '1.0')
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk
 from kukni.application import KukniApplication
+from kukni.geometry import preferred_window_size
 from kukni.renderers.image_view import ImagePreviewView
 from kukni.session import PreviewState
 from kukni.window import PreviewWindow
@@ -29,6 +30,7 @@ FIXTURES = {
     'square.png': (900, 900),
     'panorama.png': (2400, 400),
     'tiny.png': (64, 48),
+    'large.png': (2400, 1600),
 }
 
 
@@ -185,6 +187,12 @@ class ImageSmoke(Adw.Application):
             yield from self.ready(name)
         require(self.view().zoom == 1, 'Tiny image was upscaled by Fit')
         require(self.view().picture.get_width() == 64, 'Tiny pixels stretched to fill the window')
+
+        self.show('large.png')
+        yield from self.ready('large.png')
+        wanted = preferred_window_size('image', self.window._monitor_size(), 2400, 1600)
+        require(self.window.get_default_size() == (wanted.width, wanted.height),
+                'Large image did not use the expanded logical-screen allowance')
 
         self.show('landscape.png')
         yield from self.ready('landscape.png')

@@ -21,28 +21,37 @@ class Size:
 # @decision Leave room for desktop chrome instead of using physical pixels or
 # assuming a Wayland workarea/position API. Gdk monitor geometry is already in
 # logical pixels, including mixed-DPI displays; never multiply it by scale.
+# @why The former 1120×860 canvas cap wasted usable space on larger monitors.
+# Let real images use the bounded screen area, without stretching tiny images
+# or making metadata/audio cards needlessly large.
 def preferred_window_size(
     kind: str,
     monitor: Size,
     width: int = 0,
     height: int = 0,
 ) -> Size:
-    maximum = Size(max(1, min(1440, int(monitor.width * .86))),
-                   max(1, min(1040, int(monitor.height * .86))))
-    if kind in ("image", "pdf") and width > 0 and height > 0:
+    maximum = Size(max(1, min(1800, int(monitor.width * .90))),
+                   max(1, min(1440, int(monitor.height * .90))))
+    if kind == "image" and width > 0 and height > 0:
         chrome = 100
-        canvas_width = max(1, min(1120, maximum.width - 24))
-        canvas_height = max(1, min(860, maximum.height - chrome))
+        canvas_width = max(1, maximum.width - 24)
+        canvas_height = max(1, maximum.height - chrome)
         scale = min(1.0, canvas_width / width, canvas_height / height)
         wanted = Size(max(360, round(width * scale) + 24),
                       max(280, round(height * scale) + chrome))
+    elif kind == "pdf":
+        # @decision A document is a readable, scrolling page column, not a
+        # photograph that must fit in its entirety. Give portrait pages enough
+        # width for text; scrolling reveals the rest. Only the initial page
+        # suggests an orientation, so later pages never bounce the window.
+        wanted = Size(1280 if width > height > 0 else 1040, 1280)
     else:
         wanted = {
-            "text": Size(900, 720),
-            "document": Size(980, 760),
+            "text": Size(1024, 1040),
+            "document": Size(1200, 1040),
+            "folder": Size(700, 600),
             "audio": Size(600, 320),
-            "video": Size(1000, 660),
-            "pdf": Size(650, 880),
+            "video": Size(1280, 800),
         }.get(kind, Size(520, 360))
     return Size(min(wanted.width, maximum.width),
                 min(wanted.height, maximum.height))

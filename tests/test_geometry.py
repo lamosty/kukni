@@ -27,7 +27,7 @@ class GeometryTests(unittest.TestCase):
 
     def test_family_presets_are_not_one_fixed_size(self):
         monitor = Size(1920, 1080)
-        families = ('text', 'document', 'audio', 'video', 'pdf', 'fallback')
+        families = ('text', 'document', 'folder', 'audio', 'video', 'pdf', 'fallback')
         self.assertEqual(len({preferred_window_size(kind, monitor) for kind in families}), len(families))
         self.assertLess(preferred_window_size('audio', monitor).height,
                         preferred_window_size('text', monitor).height)
@@ -37,19 +37,46 @@ class GeometryTests(unittest.TestCase):
         # pure function must never convert it back to physical pixel bounds.
         for monitor in (Size(1920, 1080), Size(960, 540), Size(800, 600),
                         Size(320, 240), Size(1, 1), Size(7680, 4320)):
-            for kind in ('image', 'pdf', 'audio', 'text', 'video', 'fallback'):
+            for kind in ('image', 'pdf', 'document', 'folder', 'audio', 'text', 'video', 'fallback'):
                 for dimensions in ((12000, 8000), (800, 6000), (24000, 100), (0, 0)):
                     with self.subTest(monitor=monitor, kind=kind, dimensions=dimensions):
                         wanted = preferred_window_size(kind, monitor, *dimensions)
-                        self.assertLessEqual(wanted.width, max(1, min(1440, int(monitor.width * .86))))
-                        self.assertLessEqual(wanted.height, max(1, min(1040, int(monitor.height * .86))))
+                        self.assertLessEqual(wanted.width, max(1, min(1800, int(monitor.width * .90))))
+                        self.assertLessEqual(wanted.height, max(1, min(1440, int(monitor.height * .90))))
 
     def test_missing_and_invalid_intrinsics_use_safe_family_preset(self):
         monitor = Size(1920, 1080)
-        self.assertEqual(preferred_window_size('pdf', monitor, -1, 5), Size(650, 880))
+        self.assertEqual(preferred_window_size('pdf', monitor, -1, 5), Size(1040, 972))
         self.assertEqual(preferred_window_size('future-kind', monitor), Size(520, 360))
         with self.assertRaises(ValueError):
             Size(0, 100)
+
+    def test_large_images_use_more_available_space_without_old_canvas_cap(self):
+        normal = preferred_window_size('image', Size(1920, 1080), 6000, 4000)
+        large = preferred_window_size('image', Size(2560, 1440), 6000, 4000)
+        self.assertGreater(normal.width, 1120 + 24)
+        self.assertGreater(normal.height, 860 + 100)
+        self.assertGreater(large.width, normal.width)
+        self.assertGreater(large.height, normal.height)
+        self.assertAlmostEqual((large.width - 24) / (large.height - 100), 1.5, places=2)
+
+    def test_pdf_is_a_readable_column_not_a_tiny_fit_page_image(self):
+        monitor = Size(1920, 1080)
+        portrait = preferred_window_size('pdf', monitor, 1273, 1800)
+        very_tall = preferred_window_size('pdf', monitor, 300, 1800)
+        landscape = preferred_window_size('pdf', monitor, 1800, 1273)
+        self.assertGreaterEqual(portrait.width, 1000)
+        self.assertGreaterEqual(portrait.height, 900)
+        self.assertEqual(very_tall, portrait)
+        self.assertGreater(landscape.width, portrait.width)
+
+    def test_reading_views_grow_but_cards_stay_compact(self):
+        monitor = Size(2560, 1440)
+        self.assertGreaterEqual(preferred_window_size('text', monitor).height, 1000)
+        self.assertGreater(preferred_window_size('document', monitor).width, 1100)
+        self.assertEqual(preferred_window_size('folder', monitor), Size(700, 600))
+        self.assertEqual(preferred_window_size('fallback', monitor), Size(520, 360))
+        self.assertEqual(preferred_window_size('audio', monitor), Size(600, 320))
 
     def test_small_size_differences_do_not_bounce_window(self):
         self.assertFalse(meaningfully_different(Size(1000, 800), Size(1040, 830)))
