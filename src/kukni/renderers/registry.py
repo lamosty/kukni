@@ -50,6 +50,7 @@ def default_registry() -> RendererRegistry:
     """Return built-in rich renderers in deterministic priority order."""
 
     from .cr2 import Cr2Renderer
+    from .folder import FolderRenderer
     from .html import HtmlRenderer
     from .image import ImageRenderer
     from .pdf import PdfRenderer
@@ -61,6 +62,7 @@ def default_registry() -> RendererRegistry:
     # memory/task limits (or a verified no-fork policy) are integration-tested.
     return RendererRegistry(
         (
+            FolderRenderer(),
             Cr2Renderer(),
             ImageRenderer(),
             SpreadsheetRenderer(),

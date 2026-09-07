@@ -13,15 +13,20 @@ from gi.repository import Gio, GLib, Gtk
 from .text import sanitize_display_label
 
 
-def unavailable_message(info: Gio.FileInfo) -> str:
+def unavailable_message(info: Gio.FileInfo, *, failed: bool = False) -> str:
     """Explain the missing preview without exposing file bytes or internals."""
 
     if info.get_file_type() == Gio.FileType.DIRECTORY:
-        return "Folder previews aren't available yet."
+        return "The contents of this folder couldn't be listed."
     if info.get_file_type() != Gio.FileType.REGULAR:
         return "This item doesn't have a preview."
     if info.get_size() == 0:
         return "This file is empty."
+    # @why A decoder/permission failure is not evidence that an otherwise
+    # supported format is missing. Keep technical reasons in Details, without
+    # incorrectly telling the user that PDF or image previews do not exist.
+    if failed:
+        return "A preview of this file couldn't be created."
     return "A preview isn't available for this file type yet."
 
 
@@ -55,7 +60,7 @@ class FallbackView(Gtk.Box):
         heading.add_css_class("title-2")
         self.append(heading)
         message = Gtk.Label(
-            label=unavailable_message(info),
+            label=unavailable_message(info, failed=bool(detail)),
             wrap=True,
             justify=Gtk.Justification.CENTER,
             max_width_chars=44,

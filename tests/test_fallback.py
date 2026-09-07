@@ -31,8 +31,17 @@ class FallbackMessageTests(unittest.TestCase):
     def test_folder_is_not_described_as_empty_or_binary(self):
         self.assertEqual(
             unavailable_message(self.info(Gio.FileType.DIRECTORY, 0)),
-            "Folder previews aren't available yet.",
+            "The contents of this folder couldn't be listed.",
         )
+
+    def test_renderer_failure_is_not_mislabeled_as_an_unsupported_format(self):
+        self.assertEqual(
+            unavailable_message(self.info(), failed=True),
+            "A preview of this file couldn't be created.",
+        )
+
+    def test_failure_does_not_turn_an_empty_file_into_a_decoder_problem(self):
+        self.assertEqual(unavailable_message(self.info(size=0), failed=True), "This file is empty.")
 
     def test_special_file_has_no_content_inspection(self):
         self.assertEqual(

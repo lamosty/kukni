@@ -50,6 +50,7 @@ test-ui:
 	./tests/run-ui.sh python3 tests/smoke_pdf.py
 	./tests/run-ui.sh python3 tests/smoke_media.py
 	./tests/run-ui.sh python3 tests/smoke_text.py
+	./tests/run-ui.sh python3 tests/smoke_folder.py
 
 # @constraint This separate gate requires the Ubuntu package to be installed.
 # Its synthetic activation session never uses the user's D-Bus registrations.

@@ -3,6 +3,7 @@
 
 import sys
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -64,8 +65,38 @@ class RendererRegistryTests(unittest.TestCase):
     def test_default_registry_has_deterministic_built_in_order(self):
         self.assertEqual(
             tuple(renderer.id for renderer in default_registry().renderers),
-            ("cr2", "image", "xlsx", "pdf", "html", "text"),
+            ("folder", "cr2", "image", "xlsx", "pdf", "html", "text"),
         )
+
+    def test_default_registry_routes_folders_without_claiming_regular_formats(self):
+        from gi.repository import Gio
+
+        attributes = ",".join(
+            (
+                Gio.FILE_ATTRIBUTE_STANDARD_TYPE,
+                Gio.FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+            )
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixtures = {
+                "folder": root,
+                "image": root / "picture.png",
+                "pdf": root / "document.pdf",
+                "text": root / "notes.txt",
+            }
+            fixtures["image"].write_bytes(b"\x89PNG\r\n\x1a\n")
+            fixtures["pdf"].write_bytes(b"%PDF-1.7\n")
+            fixtures["text"].write_text("hello\n", encoding="utf-8")
+            registry = default_registry()
+
+            selected = {}
+            for expected, path in fixtures.items():
+                file = Gio.File.new_for_path(str(path))
+                info = file.query_info(attributes, Gio.FileQueryInfoFlags.NONE, None)
+                selected[expected] = registry.select(file, info).id
+
+        self.assertEqual(selected, {name: name for name in fixtures})
 
     def test_media_renderer_remains_available_for_explicit_opt_in(self):
         from kukni.renderers.media import MediaRenderer
