@@ -148,12 +148,22 @@ class PackageTests(unittest.TestCase):
             root = Path(temporary)
             (root / 'VERSION').write_text('1.2.3\n')
             with mock.patch.object(builder.subprocess, 'check_output', side_effect=[
-                b'', b'42\n', b'abc123def456\n',
+                b'false\n', b'', b'42\n', b'abc123def456\n',
             ]):
                 self.assertEqual(builder.source_version(root), '1.2.3~alpha.42+gabc123def456')
-            with mock.patch.object(builder.subprocess, 'check_output', return_value=b' M changed\n'):
+            with mock.patch.object(builder.subprocess, 'check_output', side_effect=[
+                b'false\n', b' M changed\n',
+            ]):
                 with self.assertRaisesRegex(ValueError, 'Commit source changes'):
                     builder.source_version(root)
+
+    def test_source_version_refuses_shallow_history_before_counting_commits(self):
+        with mock.patch.object(builder.subprocess, 'check_output', return_value=b'true\n') as git:
+            with self.assertRaisesRegex(ValueError, 'full Git history'):
+                builder.source_version(ROOT)
+        git.assert_called_once_with(
+            ['git', 'rev-parse', '--is-shallow-repository'], cwd=ROOT,
+        )
 
     @unittest.skipUnless(Path('/usr/sbin/apparmor_parser').is_file(), 'AppArmor compiler unavailable')
     def test_policy_compiles_without_loading_or_changing_kernel_state(self):

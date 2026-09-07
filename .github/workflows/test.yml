@@ -17,6 +17,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Package versions use the commit count; shallow history can make an
+          # otherwise newer build sort older than an installed alpha.
+          fetch-depth: 0
 
       - name: Install runtime test dependencies
         run: |
@@ -47,3 +50,21 @@ jobs:
           python3 packaging/build-deb.py
           sudo apt-get install --yes --no-install-recommends ./dist/kukni_*.deb
           /usr/bin/kukni --check
+
+      # Keep the exact tested package, not a second unverified rebuild. These
+      # expiring CI artifacts are alpha test downloads, not a public release
+      # channel or an APT repository. Never upload the checkout or private data.
+      - name: Checksum the verified package
+        working-directory: dist
+        run: sha256sum kukni_*.deb > SHA256SUMS
+
+      - name: Keep the verified Ubuntu alpha package
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kukni-ubuntu-24.04-${{ github.sha }}
+          path: |
+            dist/kukni_*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30

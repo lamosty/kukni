@@ -20,6 +20,13 @@ SYSTEM_LAUNCHER = '/usr/bin/kukni'
 def source_version(root: Path) -> str:
     # A clean versioned checkout makes upgrades monotonic and the installed
     # payload traceable. Tests call build_package with their explicit version.
+    # @why Shallow CI checkouts reset the commit count to one. Such a package
+    # can sort older than an already-installed alpha even when its code is new.
+    shallow = subprocess.check_output(
+        ['git', 'rev-parse', '--is-shallow-repository'], cwd=root,
+    ).strip()
+    if shallow != b'false':
+        raise ValueError('A full Git history is required; run git fetch --unshallow first')
     status = subprocess.check_output(['git', 'status', '--porcelain'], cwd=root)
     if status.strip():
         raise ValueError('Commit source changes before building a release package')
