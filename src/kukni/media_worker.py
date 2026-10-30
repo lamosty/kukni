@@ -407,6 +407,10 @@ def build_media_worker_launch(
         "/lib64",
         "/etc/ld.so.cache",
         "/etc/localtime",
+        # Ubuntu's libav dependency chain resolves BLAS/LAPACK and other
+        # public runtime libraries through these symlinks. Without them the
+        # codec plugin exists in /usr but cannot load inside the sandbox.
+        "/etc/alternatives",
     ):
         if Path(source).exists():
             sandbox_command.extend(("--ro-bind", source, source))

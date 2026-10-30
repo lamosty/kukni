@@ -209,6 +209,10 @@ class MediaWorkerCommandTests(unittest.TestCase):
         self.assertIn("--clearenv", command)
         self.assertIn("--remount-ro", command)
         bwrap_index = command.index("/usr/bin/bwrap")
+        if Path("/etc/alternatives").exists():
+            self.assertIn("/etc/alternatives", command)
+            alternatives_index = command.index("/etc/alternatives")
+            self.assertEqual(command[alternatives_index - 1], "--ro-bind")
         sandbox_separator = command.index("--", bwrap_index)
         self.assertLess(command.index("--remount-ro"), sandbox_separator)
         self.assertIn("--die-with-parent", command)
