@@ -61,15 +61,26 @@ def verify_output(output, kind):
 
 
 def main():
-    from .media_worker import run_media_worker
+    from .media_worker import MediaWorkerError, run_media_worker
+    stage = "startup"
     try:
         with tempfile.TemporaryDirectory(prefix="kukni-media-check-") as temporary:
             for kind in ("wmv", "mkv", "wav"):
                 path = Path(temporary) / ("sample." + kind)
+                stage = f"generate {kind.upper()}"
                 generate_sample(path, kind)
-                verify_output(run_media_worker(path), kind)
+                stage = f"decode {kind.upper()}"
+                output = run_media_worker(path)
+                stage = f"pixels and duration {kind.upper()}"
+                verify_output(output, kind)
                 print(f"Media {kind.upper()} self-test: Passed")
         return 0
+    except MediaWorkerError as error:
+        # These are fixed supervisor diagnostics; decoder-controlled stderr
+        # and exception strings never cross its process boundary.
+        exit_detail = f", exit {error.exit_code}" if type(error.exit_code) is int else ""
+        print(f"Media self-test: Failed ({stage}: {error}{exit_detail})")
+        return 1
     except Exception:
-        print("Media self-test: Failed (codec, sandbox or pixels)")
+        print(f"Media self-test: Failed ({stage})")
         return 1

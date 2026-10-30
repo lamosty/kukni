@@ -51,6 +51,10 @@ _WORKER_SLOTS = threading.BoundedSemaphore(2)
 class MediaWorkerError(RuntimeError):
     """A worker request or result violated the media preview contract."""
 
+    def __init__(self, message: str, *, exit_code: int | None = None):
+        super().__init__(message)
+        self.exit_code = exit_code
+
 
 class MediaWorkerCancelled(Exception):
     """Media preparation stopped because its preview request was superseded."""
@@ -583,7 +587,7 @@ def run_media_worker(
             clock=clock,
         )
         if returncode != 0:
-            raise MediaWorkerError("the media worker failed")
+            raise MediaWorkerError("the media worker failed", exit_code=returncode)
         _check_cancelled(cancelled)
 
         result_payload = _read_bounded_output(
