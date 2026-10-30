@@ -14,6 +14,7 @@ The `main` branch already provides:
 - standalone Canon CR2 previews using the embedded display JPEG in a bounded,
   killable decoder worker that returns validated raw RGBA;
 - common raster-image previews through that same process boundary;
+- isolated video stills and audio duration details, plus GNOME Files video thumbnails;
 - adaptive window sizing, image/PDF fit and zoom, and file information on demand;
 - explicit file-manager session ownership and a bounded memory-only image cache;
 - bounded text/source previews and a metadata-only unavailable state;
@@ -29,8 +30,8 @@ The `main` branch already provides:
 - synthetic parser, real image-worker, GTK, D-Bus, and installation tests.
 
 This is enough to test Kukni as an independent previewer, but it is not yet a
-broad-format daily-driver release. SVG, HEIC, non-CR2 camera RAW, audio, and
-video currently use the fallback view.
+broad-format daily-driver release. SVG, HEIC and non-CR2 camera RAW currently
+use the fallback view. Media previews are passive; playback remains separate.
 
 ## 0.1 — Standalone preview release
 
@@ -67,14 +68,12 @@ Make Kukni immediately useful for the most common visual files:
 
 ## 0.3 — Media containment
 
-The media worker protocol and supervisor exist, but automatic routing stays off
-until the remaining process-tree boundary is real and testable:
+Passive media now uses a mandatory no-fork policy inside the packaged namespace
+sandbox, with installed WMV/MKV/WAV checks and desktop thumbnail verification.
+Decoder threads share one address-space and CPU allowance. Further work:
 
-- place each worker in a disposable cgroup or equivalent aggregate task/memory
-  boundary;
-- prove the sandbox PID namespace is quiescent before accepting output;
-- ship the required package-level sandbox policy;
-- enable a bounded static video frame and inert audio metadata first;
+- broaden real codec/container coverage and verify the ARM64 policy on hardware;
+- consider a disposable cgroup for an independent task-count limit;
 - treat interactive playback, seeking, and waveforms as a separate IPC design.
 
 ## 0.4 — Documents and richer navigation
