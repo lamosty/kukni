@@ -23,6 +23,7 @@ Usage: kukni [FILE]
        kukni --check
        kukni --check-html
        kukni --check-media
+       kukni --check-thumbnails
        kukni --version
 
 Preview FILE, or open an empty Kukni window when no file is supplied.
@@ -35,6 +36,7 @@ Options:
   --check-html   Verify WebKit pixels; requires a display and briefly opens a
                  window containing only the fixed synthetic test page.
   --check-media  Verify synthetic WMV, MKV and WAV through the media sandbox.
+  --check-thumbnails  Verify WMV through GNOME's thumbnail factory (requires its typelib).
   --version      Show the running checkout or installed package revision.
   -h, --help     Show this help.
 
@@ -147,6 +149,9 @@ def main(
     if options == ["--check-media"]:
         from kukni.media_diagnostics import main as media_main
         return media_main()
+    if options == ["--check-thumbnails"]:
+        from kukni.media_diagnostics import check_thumbnails
+        return check_thumbnails()
     if options == ["--version"]:
         print("Kukni " + _checkout_version(PROJECT_ROOT))
         return 0

@@ -4,6 +4,7 @@
 """Fixed synthetic media checks through the installed worker boundary."""
 
 from pathlib import Path
+import subprocess
 import tempfile
 import wave
 
@@ -63,6 +64,10 @@ def verify_output(output, kind):
 def main():
     from .media_worker import MediaWorkerError, run_media_worker
     stage = "startup"
+    diagnostic = tempfile.TemporaryFile()
+    def start_worker(*args, **kwargs):
+        kwargs["stderr"] = diagnostic
+        return subprocess.Popen(*args, **kwargs)
     try:
         with tempfile.TemporaryDirectory(prefix="kukni-media-check-") as temporary:
             for kind in ("wmv", "mkv", "wav"):
@@ -70,7 +75,7 @@ def main():
                 stage = f"generate {kind.upper()}"
                 generate_sample(path, kind)
                 stage = f"decode {kind.upper()}"
-                output = run_media_worker(path)
+                output = run_media_worker(path, process_factory=start_worker)
                 stage = f"pixels and duration {kind.upper()}"
                 verify_output(output, kind)
                 print(f"Media {kind.upper()} self-test: Passed")
@@ -80,7 +85,44 @@ def main():
         # and exception strings never cross its process boundary.
         exit_detail = f", exit {error.exit_code}" if type(error.exit_code) is int else ""
         print(f"Media self-test: Failed ({stage}: {error}{exit_detail})")
+        # This explicit self-test uses only app-generated fixtures and a fixed,
+        # cleared environment. Expose bounded launcher diagnostics, never codec
+        # stderr (the helper suppresses it) or diagnostics for a selected file.
+        diagnostic.seek(0)
+        for line in diagnostic.read(4096).splitlines():
+            if line.startswith(b"bwrap:"):
+                print("Media sandbox: " + line[:512].decode("ascii", "backslashreplace"))
         return 1
     except Exception:
         print(f"Media self-test: Failed ({stage})")
+        return 1
+    finally:
+        diagnostic.close()
+
+
+def check_thumbnails():
+    """Run the fixed desktop check under the packaged namespace permission.
+
+    A source Python test lacks the AppArmor permission available to Nautilus
+    and the installed Kukni launcher on Ubuntu. Keep this check app-owned;
+    never grant namespace permission to an arbitrary checkout script.
+    """
+    try:
+        import gi
+        gi.require_version("GnomeDesktop", "4.0")
+        from gi.repository import GnomeDesktop
+        with tempfile.TemporaryDirectory(prefix="kukni-desktop-thumbnail-") as temporary:
+            path = Path(temporary) / "blue.wmv"
+            generate_sample(path, "wmv")
+            factory = GnomeDesktop.DesktopThumbnailFactory.new(GnomeDesktop.DesktopThumbnailSize.LARGE)
+            pixbuf = factory.generate_thumbnail(path.as_uri(), "video/x-ms-wmv", None)
+            if pixbuf is None or pixbuf.get_width() != 64 or pixbuf.get_height() != 48:
+                raise ValueError("incorrect thumbnail dimensions")
+            data = pixbuf.get_pixels()
+            if not (data[0] < 20 and data[1] < 20 and data[2] > 230):
+                raise ValueError("incorrect thumbnail pixels")
+        print("GNOME Files WMV thumbnail: Passed")
+        return 0
+    except Exception:
+        print("GNOME Files WMV thumbnail: Failed")
         return 1

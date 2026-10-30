@@ -803,7 +803,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 thumbnail(arguments)
             else:
                 limits = parse_cli(arguments)
-                restrict_worker()
+                try:
+                    restrict_worker()
+                except Exception:
+                    _report_failure(report_fd)
+                    return 2
                 run(limits)
         except BaseException:
             _report_failure(report_fd)

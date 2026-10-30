@@ -58,7 +58,7 @@ test-ui:
 # Its synthetic activation session never uses the user's D-Bus registrations.
 test-installed:
 	/usr/bin/kukni --check-media
-	./tests/run-ui.sh python3 tests/smoke_file_manager_thumbnails.py
+	./tests/run-ui.sh timeout --kill-after=2s 25s /usr/bin/kukni --check-thumbnails
 	./tests/run-ui.sh python3 tests/smoke_installed_activation.py
 	./tests/run-ui.sh timeout --kill-after=2s 20s /usr/bin/kukni --check-html
 
