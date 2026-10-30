@@ -65,7 +65,7 @@ class RendererRegistryTests(unittest.TestCase):
     def test_default_registry_has_deterministic_built_in_order(self):
         self.assertEqual(
             tuple(renderer.id for renderer in default_registry().renderers),
-            ("folder", "cr2", "image", "xlsx", "pdf", "html", "text"),
+            ("folder", "cr2", "image", "media-still", "xlsx", "pdf", "html", "text"),
         )
 
     def test_default_registry_routes_folders_without_claiming_regular_formats(self):

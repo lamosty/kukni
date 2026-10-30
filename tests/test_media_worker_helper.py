@@ -557,5 +557,45 @@ class DecodeLifecycleTests(unittest.TestCase):
         self.assertEqual(states, [self.paused, self.null])
 
 
+class ThumbnailTests(unittest.TestCase):
+    @contextmanager
+    def prepared(self, directory):
+        source = Path(directory) / "input.wmv"
+        source.write_bytes(b"synthetic media")
+        output = Path(directory) / "output.png"
+        media = worker.DecodedMedia("video", True, False, 1_000_000, 2, 1,
+                                    b"\0\0\xff\xff" * 2)
+        with (mock.patch.object(worker, "restrict_worker"),
+              mock.patch.object(worker.resource, "setrlimit"),
+              mock.patch.object(worker.signal, "signal"),
+              mock.patch.object(worker.signal, "alarm"),
+              mock.patch.object(worker, "decode_media", return_value=media)):
+            yield source, output
+
+    def test_writes_a_real_bounded_png_from_validated_pixels(self):
+        import gi
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf
+        with tempfile.TemporaryDirectory() as directory, self.prepared(directory) as (source, output):
+            worker.thumbnail(["--thumbnail", "256", str(source), str(output)])
+            picture = GdkPixbuf.Pixbuf.new_from_file(str(output))
+            self.assertEqual((picture.get_width(), picture.get_height()), (2, 1))
+            self.assertEqual(picture.get_pixels(), b"\0\0\xff\xff" * 2)
+
+    def test_rejects_invalid_size_fifo_and_existing_output(self):
+        with tempfile.TemporaryDirectory() as directory, self.prepared(directory) as (source, output):
+            for size in ("0", "-1", "1025", "bad"):
+                with self.assertRaises(worker.WorkerError):
+                    worker.thumbnail(["--thumbnail", size, str(source), str(output)])
+            fifo = Path(directory) / "fifo.wmv"
+            os.mkfifo(fifo)
+            with self.assertRaises(worker.WorkerError):
+                worker.thumbnail(["--thumbnail", "256", str(fifo), str(output)])
+            output.write_bytes(b"preserve existing output")
+            with self.assertRaises(FileExistsError):
+                worker.thumbnail(["--thumbnail", "256", str(source), str(output)])
+            self.assertEqual(output.read_bytes(), b"preserve existing output")
+
+
 if __name__ == "__main__":
     unittest.main()

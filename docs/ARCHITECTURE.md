@@ -21,6 +21,7 @@ Nautilus Space key                         `kukni FILE`
                   ├─ folder → bounded immediate-child metadata summary
                   ├─ Canon CR2 → disposable decode worker → raw RGBA
                   ├─ raster images → same bounded pixel contract → raw RGBA
+                  ├─ media → sandboxed no-fork worker → still frame / duration
                   ├─ native XLSX table
                   ├─ gated PDF worker
                   ├─ gated HTML renderer
@@ -161,14 +162,25 @@ compatibility profile is not itself a decoder sandbox: Bubblewrap/WebKit must
 still establish their required isolation, and installed-package tests must
 prove real renderer success. No global namespace restriction is disabled.
 
-## Experimental media work that is not routed
+## Passive media and desktop thumbnails
 
-An isolated media worker and parent supervisor can produce one bounded video
-frame or audio metadata through a size-checked protocol. It is deliberately
-absent from the default registry: per-process limits do not yet provide the
-aggregate process-tree and task containment required for automatic decoding of
-untrusted media. Enabling it requires a tested cgroup or equivalent no-fork
-boundary plus packaged sandbox integration tests.
+The default registry routes media to `MediaStillRenderer`. It runs the existing
+media supervisor off GTK and receives only validated raw RGBA and duration.
+One admission slot remains held through GTK delivery, with cancellation and
+late-result checks. Video uses the same zoom canvas as pictures; audio uses a
+native duration card. Experimental in-process playback stays unregistered.
+
+The worker requires its Bubblewrap namespaces and a libseccomp no-fork policy
+installed before codec imports. Process-producing clone, fork, vfork, clone3,
+unshare and exec are denied; permitted threads share one address-space and CPU
+allowance. Unsupported ABIs fail closed. Installed-package checks decode
+synthetic WMV, MKV and WAV and verify pixels and duration through this boundary.
+
+GNOME Files has a separate `.thumbnailer` registration. Its own sandbox launches
+the helper's thumbnail entry point, which enforces the same no-fork policy plus
+resource limits and a fatal wall deadline. It returns one bounded PNG; Files
+owns the cache and thumbnail visibility settings. This entry point must not
+nest Bubblewrap inside GNOME's sandbox, which blocks creating new namespaces.
 
 PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO have an automatic raster route. It
 reuses the existing CR2 supervisor, descriptor contract, decoder validation,

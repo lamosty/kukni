@@ -21,9 +21,8 @@ jobs:
           # otherwise newer build sort older than an installed alpha.
           fetch-depth: 0
 
-      # WebKit brings the codecs that make the optional media smoke runnable;
-      # GTK's separately packaged media backend must be present too. This does
-      # not enable automatic media routing in the application.
+      # Automatic media previews use the isolated worker. GTK's separately
+      # packaged backend is needed only for the experimental playback smoke.
       - name: Install runtime test dependencies
         run: |
           sudo apt-get update
@@ -32,9 +31,12 @@ jobs:
             gir1.2-adw-1 \
             gir1.2-gst-plugins-base-1.0 \
             gir1.2-gstreamer-1.0 \
+            gir1.2-gnomedesktop-4.0 \
             gir1.2-gtk-4.0 \
             gir1.2-webkit-6.0 \
             libgtk-4-media-gstreamer \
+            gstreamer1.0-libav \
+            gstreamer1.0-plugins-ugly \
             libxtst6 \
             poppler-utils \
             python3-gi \

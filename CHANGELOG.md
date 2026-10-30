@@ -37,10 +37,12 @@ All notable changes to this project will be documented here.
   dependency.
 - Add sandbox-gated HTML previews and bounded lazy PDF page navigation, with
   shared fit/zoom controls and cancellation of obsolete page requests.
-- Add an isolated media-worker protocol and strict parent supervisor for one
-  bounded video frame or inert audio metadata. Keep automatic media routing
-  disabled pending aggregate process-tree containment and packaged sandbox
-  tests.
+- Enable isolated still-frame video previews, including WMV, and audio duration
+  details using the media worker. Require a tested no-fork policy, namespace
+  sandbox and bounded raw-pixel protocol; keep playback disabled.
+- Install a GNOME Files video thumbnailer and required codecs with the Ubuntu
+  package. Verify real WMV, MKV and WAV decoding and desktop WMV thumbnails in
+  installed-package CI.
 
 ### Installation and compatibility
 

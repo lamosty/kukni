@@ -14,11 +14,18 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import ctypes
+import errno
 import json
 import math
 import os
+import platform
+import resource
+import signal
 import stat
+import struct
 import sys
+import zlib
 from typing import Iterator, NoReturn, Sequence
 
 
@@ -55,6 +62,61 @@ _CLI_FLAGS = (
 
 class WorkerError(RuntimeError):
     """A request or decoded frame violated the worker contract."""
+
+
+def restrict_worker() -> None:
+    """Allow decoder threads, never additional processes or executable images.
+
+    Install before importing GStreamer or opening the input. All permitted
+    clones share one address space and CPU allowance. A per-user NPROC ceiling
+    would count unrelated desktop threads and can prevent all decoding, so
+    containment uses the no-fork alternative instead of per-process allowances
+    that can be multiplied by children.
+    clone3's pointer arguments cannot be filtered, so return ENOSYS to make
+    libc use the filterable clone syscall. Unsupported ABIs fail closed.
+    """
+    if platform.machine() not in ("x86_64", "aarch64"):
+        raise WorkerError("the media process policy is unavailable")
+    lib = ctypes.CDLL("libseccomp.so.2", use_errno=True)
+
+    class Comparison(ctypes.Structure):
+        _fields_ = [("arg", ctypes.c_uint), ("op", ctypes.c_uint),
+                    ("mask", ctypes.c_uint64), ("value", ctypes.c_uint64)]
+
+    lib.seccomp_init.argtypes = [ctypes.c_uint32]
+    lib.seccomp_init.restype = ctypes.c_void_p
+    lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+    lib.seccomp_syscall_resolve_name.restype = ctypes.c_int
+    lib.seccomp_rule_add_array.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                          ctypes.c_int, ctypes.c_uint,
+                                          ctypes.POINTER(Comparison)]
+    lib.seccomp_load.argtypes = [ctypes.c_void_p]
+    lib.seccomp_release.argtypes = [ctypes.c_void_p]
+    context = lib.seccomp_init(0x7fff0000)  # SCMP_ACT_ALLOW; bad ABIs are killed.
+    if not context:
+        raise WorkerError("the media process policy is unavailable")
+    try:
+        for name in ("fork", "vfork", "clone", "clone3", "unshare", "execve", "execveat"):
+            syscall = lib.seccomp_syscall_resolve_name(name.encode("ascii"))
+            # ARM64 has no fork/vfork syscalls: libc implements them via clone.
+            if syscall < 0 and platform.machine() == "aarch64" and name in ("fork", "vfork"):
+                continue
+            if syscall == -1:
+                raise WorkerError("the media process policy is unavailable")
+            # SCMP_CMP_MASKED_EQ: reject clone unless CLONE_THREAD is set.
+            comparison = Comparison(0, 7, 0x10000, 0)
+            action = 0x00050000 | (errno.ENOSYS if name == "clone3" else errno.EPERM)
+            result = lib.seccomp_rule_add_array(
+                context, action, syscall, int(name == "clone"),
+                ctypes.byref(comparison) if name == "clone" else None,
+            )
+            if result != 0:
+                raise WorkerError("the media process policy is unavailable")
+        # libseccomp enables no_new_privs before installing the filter.
+        if lib.seccomp_load(context) != 0:
+            raise WorkerError("the media process policy is unavailable")
+    finally:
+        lib.seccomp_release(context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,6 +507,12 @@ def decode_media(input_fd: int, limits: WorkerLimits) -> DecodedMedia:
     pipeline = None
     try:
         pipeline = _require_element(Gst, "playbin")
+        # Software codecs otherwise size their pools from the host CPU count,
+        # wasting the worker's bounded address space for a single still frame.
+        def limit_decoder_threads(_bin, _sub_bin, element):
+            if element.find_property("max-threads") is not None:
+                element.set_property("max-threads", 2)
+        pipeline.connect("deep-element-added", limit_decoder_threads)
         audio_sink = _require_element(Gst, "fakesink")
         video_sink, app_sink = _build_video_sink(Gst, limits)
         audio_sink.set_property("sync", False)
@@ -621,6 +689,55 @@ def run(limits: WorkerLimits) -> None:
         _write_all(files.result_fd, result)
 
 
+def thumbnail(argv: Sequence[str]) -> None:
+    """GNOME Files supplies the filesystem/network sandbox for this entry point.
+
+    Do not nest bubblewrap: GNOME's thumbnail sandbox blocks new namespaces.
+    Keep the same decoder policy, plus a self-enforced deadline and limits.
+    The desktop owns the PNG cache and URI/mtime metadata; we write its one
+    requested output only. Kukni's Space-key route continues to use raw RGBA.
+    """
+    if len(argv) != 4 or argv[0] != "--thumbnail":
+        raise WorkerError("invalid thumbnail request")
+    edge = _parse_bounded_decimal(argv[1], 1024)
+    for kind, maximum in ((resource.RLIMIT_AS, 1024 * 1024 * 1024),
+                          (resource.RLIMIT_CPU, 10),
+                          (resource.RLIMIT_FSIZE, 16 * 1024 * 1024),
+                          (resource.RLIMIT_NOFILE, 64), (resource.RLIMIT_CORE, 0)):
+        resource.setrlimit(kind, (maximum, maximum))
+    signal.signal(signal.SIGALRM, signal.SIG_DFL)
+    signal.alarm(12)
+    os.environ["GST_REGISTRY_FORK"] = "no"
+    restrict_worker()
+    limits = WorkerLimits(edge, edge * edge * 4, HARD_MAX_RESULT_BYTES, HARD_MAX_INPUT_BYTES)
+    descriptor = os.open(argv[2], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= limits.max_input_bytes:
+            raise WorkerError("invalid thumbnail input")
+        media = decode_media(descriptor, limits)
+        frame, _result = encode_result(media, limits)
+        if not media.has_video:
+            raise WorkerError("no video thumbnail")
+    finally:
+        os.close(descriptor)
+
+    def chunk(kind, data):
+        return (struct.pack("!I", len(data)) + kind + data
+                + struct.pack("!I", zlib.crc32(kind + data)))
+
+    stride = media.width * 4
+    rows = b"".join(b"\0" + frame[start:start + stride] for start in range(0, len(frame), stride))
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack("!2I5B", media.width, media.height, 8, 6, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+    output = os.open(argv[3], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        _write_all(output, png)
+    finally:
+        os.close(output)
+
+
 def _save_and_silence_stderr() -> int:
     """Keep one reporting FD while sending native-library logging to /dev/null."""
 
@@ -681,8 +798,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         except BaseException:
             return 1
         try:
-            limits = parse_cli(sys.argv[1:] if argv is None else argv)
-            run(limits)
+            arguments = sys.argv[1:] if argv is None else argv
+            if arguments and arguments[0] == "--thumbnail":
+                thumbnail(arguments)
+            else:
+                limits = parse_cli(arguments)
+                restrict_worker()
+                run(limits)
         except BaseException:
             _report_failure(report_fd)
             return 1

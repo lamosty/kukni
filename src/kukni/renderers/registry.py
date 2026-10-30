@@ -53,18 +53,19 @@ def default_registry() -> RendererRegistry:
     from .folder import FolderRenderer
     from .html import HtmlRenderer
     from .image import ImageRenderer
+    from .media_still import MediaStillRenderer
     from .pdf import PdfRenderer
     from .spreadsheet import SpreadsheetRenderer
     from .text import TextRenderer
 
-    # @decision MediaRenderer is intentionally omitted from automatic routing.
-    # @why Re-enable it only after process-tree teardown and aggregate decoder
-    # memory/task limits (or a verified no-fork policy) are integration-tested.
+    # Playback stays opt-in. Passive media uses the namespace-isolated worker
+    # with a no-fork policy, never an in-process GTK/GStreamer decoder.
     return RendererRegistry(
         (
             FolderRenderer(),
             Cr2Renderer(),
             ImageRenderer(),
+            MediaStillRenderer(),
             SpreadsheetRenderer(),
             PdfRenderer(),
             HtmlRenderer(),

@@ -77,6 +77,7 @@ def build_package(root: Path, destination: Path, version: str) -> Path:
             target_path.chmod(0o644)
         copy(root / 'LICENSE', 'usr/share/doc/kukni/copyright')
         copy(root / 'README.md', 'usr/share/doc/kukni/README.md')
+        copy(root / 'packaging/kukni-media.thumbnailer', 'usr/share/thumbnailers/kukni-media.thumbnailer')
         copy(root / 'packaging/debian/io.github.lamosty.Kukni.apparmor',
              'etc/apparmor.d/io.github.lamosty.Kukni')
         for name in ('postinst', 'postrm'):
@@ -87,7 +88,10 @@ def build_package(root: Path, destination: Path, version: str) -> Path:
             'Section: utils\nPriority: optional\n'
             'Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), '
             'gir1.2-adw-1 (>= 1.4), util-linux, poppler-utils, bubblewrap, '
-            'webp-pixbuf-loader, apparmor (>= 4.0)\n'
+            'webp-pixbuf-loader, apparmor (>= 4.0), libseccomp2, '
+            'gir1.2-gstreamer-1.0, gir1.2-gst-plugins-base-1.0, '
+            'gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, '
+            'gstreamer1.0-libav, gstreamer1.0-plugins-ugly\n'
             'Recommends: gir1.2-webkit-6.0\n'
             'Suggests: nautilus\nConflicts: gnome-sushi\nReplaces: gnome-sushi\n'
             'Homepage: https://github.com/lamosty/kukni\n'

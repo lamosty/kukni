@@ -102,6 +102,25 @@ is intended. Plain removal retains conffiles; `sudo apt purge kukni` performs
 complete package configuration/profile removal. A subsequent install creates a
 fresh packaged profile.
 
+## Media previews and file-manager thumbnails
+
+The package includes GStreamer base/good/ugly plugins and libav: WMV requires
+both an ASF demuxer and a Windows Media decoder. `libseccomp2` is required for
+the media helper's no-fork policy. A missing policy or sandbox is a fallback,
+never permission to decode in the UI process.
+
+`/usr/share/thumbnailers/kukni-media.thumbnailer` registers video formats with
+GNOME Files. The helper runs under GNOME's existing thumbnail sandbox and
+writes the requested PNG without managing the desktop cache or preferences.
+It is deliberately separate from the packaged Kukni launcher's namespace path.
+The legacy source copier does not install this desktop registration.
+
+`/usr/bin/kukni --check-media` generates fixed synthetic WMV, MKV and WAV files
+and verifies actual frame pixels and duration through the installed sandbox.
+`make test-installed` also asks GNOME Desktop's thumbnail factory for a real
+WMV thumbnail; CI installs its introspection package for that test. A fallback
+or missing codec fails these gates.
+
 ## Current CI download channel
 
 After unit, GTK, installed-runtime, and private installed-activation checks

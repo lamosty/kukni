@@ -50,12 +50,15 @@ test-ui:
 	./tests/run-ui.sh python3 tests/smoke_xlsx.py
 	./tests/run-ui.sh python3 tests/smoke_pdf.py
 	./tests/run-ui.sh python3 tests/smoke_media.py
+	./tests/run-ui.sh python3 tests/smoke_media_still.py
 	./tests/run-ui.sh python3 tests/smoke_text.py
 	./tests/run-ui.sh python3 tests/smoke_folder.py
 
 # @constraint This separate gate requires the Ubuntu package to be installed.
 # Its synthetic activation session never uses the user's D-Bus registrations.
 test-installed:
+	/usr/bin/kukni --check-media
+	./tests/run-ui.sh python3 tests/smoke_file_manager_thumbnails.py
 	./tests/run-ui.sh python3 tests/smoke_installed_activation.py
 	./tests/run-ui.sh timeout --kill-after=2s 20s /usr/bin/kukni --check-html
 

@@ -43,8 +43,8 @@ Clock = Callable[[], float]
 
 
 # @constraint Each decoder can consume the full per-process resource allowance.
-# Keep admission bounded even though this supervisor is not automatic-route
-# eligible until it also has aggregate process-tree limits or a no-fork policy.
+# The helper's mandatory no-fork policy shares memory/CPU limits across decoder
+# threads. Keep admission bounded across concurrent callers too.
 _WORKER_SLOTS = threading.BoundedSemaphore(2)
 
 
@@ -341,9 +341,8 @@ def build_media_worker_launch(
     # @constraint --unshare-all supplies the PID namespace and --die-with-parent
     # makes bubblewrap tear down sandbox children when its launcher dies.  That is
     # the intended process-tree quiescence property before outputs are accepted.
-    # Automatic routing remains blocked until a real integration test proves
-    # that property and either a delegated cgroup enforces aggregate memory/tasks
-    # or the worker has a no-fork policy; RLIMIT values apply only per process.
+    # The helper adds seccomp before importing codecs: only threads sharing
+    # one process are permitted, so they share the address-space/CPU limits.
 
     validate_worker_descriptors(
         input_fd=input_fd,

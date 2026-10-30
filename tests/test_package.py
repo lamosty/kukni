@@ -23,7 +23,8 @@ class PackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = builder.build_package(ROOT, Path(temporary), '0.1.0~test1')
             dependencies = subprocess.check_output(['dpkg-deb', '--field', str(output), 'Depends']).decode()
-            for required in ('bubblewrap', 'poppler-utils', 'webp-pixbuf-loader', 'apparmor'):
+            for required in ('bubblewrap', 'poppler-utils', 'webp-pixbuf-loader', 'apparmor',
+                             'libseccomp2', 'gstreamer1.0-libav', 'gstreamer1.0-plugins-ugly'):
                 self.assertIn(required, dependencies)
             self.assertEqual(
                 subprocess.check_output(['dpkg-deb', '--field', str(output), 'Conflicts']).decode().strip(),
@@ -46,6 +47,9 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(launcher.linkname, '../lib/kukni/launcher/kukni')
                 for name in ('kukni-cr2-worker.py', 'kukni-image-worker.py'):
                     self.assertTrue(archive.getmember('./usr/lib/kukni/helpers/' + name).isfile())
+                thumbnailer = archive.extractfile('./usr/share/thumbnailers/kukni-media.thumbnailer').read().decode()
+                self.assertIn('video/x-ms-wmv;', thumbnailer)
+                self.assertIn('--thumbnail %s %i %o', thumbnailer)
                 profile = archive.extractfile('./etc/apparmor.d/io.github.lamosty.Kukni').read().decode()
                 self.assertIn('/usr/lib/kukni/launcher/kukni', profile)
                 self.assertIn('flags=(unconfined)', profile)

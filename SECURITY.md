@@ -84,12 +84,29 @@ described above. Their validated pixels may be retained in a memory-only cache
 bounded to four entries and 64 MiB, with lazy 60-second expiry and file-identity
 checks; previews are not written to a persistent cache.
 
-## Disabled paths and current gaps
+## Media boundaries and current gaps
 
-Automatic audio/video routing remains disabled. The disposable media worker has
-network and PID namespaces, per-process resource limits, fixed descriptors, a
-hard parent deadline, and strict output validation, but it lacks a proven
-aggregate process-tree/task boundary for compromised decoder code.
+Automatic media previews use the disposable worker, never the experimental
+in-process playback renderer. Bubblewrap isolates filesystem, network and PID
+namespaces. Before importing codecs, a mandatory libseccomp policy denies fork,
+vfork, process-producing clone, clone3, unshare and exec. Only threads sharing
+the one process are permitted, so address-space and CPU ceilings cannot be
+multiplied by forking children. This is the no-fork containment route, not a
+cgroup or a separate task-count limit. The supported syscall ABIs are x86-64
+and ARM64; policy setup failures abort decoding.
+
+Each job allows at most 16 GiB of input, a 1,800-pixel edge and 12.96 MB of RGBA,
+with 1 GiB address space, 10 CPU seconds, 64 descriptors and a 12-second parent
+deadline. The parent validates raw pixels and metadata after worker exit and
+checks source mutation. The renderer holds one admission slot through GTK
+delivery. No decoder output is interpreted as markup or a filename.
+
+The separate GNOME Files thumbnailer uses GNOME's filesystem/network sandbox
+and the same no-fork policy, with its own resource limits and fatal 12-second
+alarm. It writes only the requested PNG, up to 1,024 pixels per edge; Files owns
+the persistent cache. Its thumbnail entry point is for the desktop sandbox,
+not an independently sandboxed command-line converter. Playback remains
+disabled in the default registry.
 
 SVG, HEIC, and non-CR2 camera RAW formats do not yet have rich standalone routes.
 They use a metadata-only fallback, not XML or byte inspection. No GNOME Sushi

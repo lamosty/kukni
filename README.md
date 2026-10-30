@@ -30,6 +30,9 @@ _Kukni_ is colloquial Slovak for “take a look.”
   in the RAW container, without developing or altering the sensor data.
 - See PNG, JPEG, WebP, GIF, TIFF, BMP, and ICO images as pictures, including
   transparency and automatic embedded orientation. Animated files show a still.
+- See still-frame previews of WMV, MP4, MKV, MOV, AVI, WebM and other local
+  videos, and duration details for audio. The Ubuntu package also registers
+  video thumbnails inside GNOME Files.
 - Read bounded, read-only previews of text, source code, configuration, logs,
   JSON, XML, CSV, Markdown, and similar files.
 - Inspect the first visible worksheet of an XLSX file without starting an
@@ -62,11 +65,28 @@ remote locations.
 | Canon CR2 | Camera-generated embedded JPEG, automatically oriented and fit to the window |
 | PNG, JPEG, WebP, GIF, TIFF, BMP, ICO | Bounded image preview; static frame only; WebP requires its GdkPixbuf loader |
 | SVG, HEIC, other images and camera RAW | File details; dedicated renderers are not connected yet |
-| Audio and video | File details; automatic media decoding is deliberately disabled |
+| Video (including WMV/ASF, MP4, MKV, MOV, AVI, WebM) | One still frame and duration; requires the media sandbox and an installed codec; no playback |
+| Audio (including WMA, MP3, AAC, FLAC, Ogg, WAV) | Duration details; no playback or album artwork |
 | Other local files | A plain “Preview unavailable” state with type and size; no byte inspection |
 
 If an optional renderer or its sandbox is unavailable, Kukni falls back rather
 than silently weakening the safety boundary.
+
+### Thumbnails inside Files
+
+The Ubuntu package installs a standard video thumbnailer for GNOME Files' icon
+and list views, separate from the Space-key preview. Files runs it in its own
+sandbox and manages its thumbnail cache. Local videos use the same decoder and
+no-fork policy as Kukni; the thumbnailer returns a PNG at the requested size.
+Thumbnail visibility still follows Files' preview preferences and file-size
+limit. Existing cached failures and another installed video thumbnailer can
+affect what Files displays. Development mode does not register thumbnailers.
+
+Media previews are passive: video shows a still and audio shows duration.
+They do not play sound or video, fetch streams, or follow playlists. The media
+process policy currently supports x86-64 and ARM64 Linux and fails closed on
+other architectures. Missing codecs, protected files and damaged media fall
+back to file details.
 
 ### Fast CR2 without RAW development
 

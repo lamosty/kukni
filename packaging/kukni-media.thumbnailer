@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=/usr/lib/kukni/helpers/kukni-media-worker.py
+Exec=/usr/bin/python3 -I /usr/lib/kukni/helpers/kukni-media-worker.py --thumbnail %s %i %o
+MimeType=video/x-ms-wmv;video/x-ms-asf;video/x-msvideo;video/avi;video/mp4;video/quicktime;video/x-m4v;video/mpeg;video/x-matroska;video/webm;video/ogg;video/3gpp;video/3gpp2;video/mp2t;video/x-flv;application/x-matroska;
